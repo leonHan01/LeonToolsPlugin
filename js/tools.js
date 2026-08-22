@@ -30,7 +30,7 @@ export function renderToolsHome(onOpen) {
   );
 }
 
-export async function renderTool(toolId, { getActiveTab, toast, goHome, reload, confirmDelete }) {
+export async function renderTool(toolId, { getActiveTab, toast, goHome, reload, confirmDelete, initialUrl }) {
   const header = (title) =>
     el(
       "div",
@@ -43,7 +43,7 @@ export async function renderTool(toolId, { getActiveTab, toast, goHome, reload, 
   if (toolId === "page") return renderPageTool(header, getActiveTab, toast, reload);
   if (toolId === "tabs") return renderTabsTool(header, toast, reload, confirmDelete);
   if (toolId === "json") return renderJsonTool(header, toast);
-  if (toolId === "url") return renderUrlTool(header, toast);
+  if (toolId === "url") return renderUrlTool(header, toast, initialUrl);
   if (toolId === "time") return renderTimeTool(header, toast);
   if (toolId === "data") return renderDataTool(header, toast, reload);
   return el("div", { class: "empty" }, "未找到该工具");
@@ -250,8 +250,9 @@ function renderJsonTool(header, toast) {
   );
 }
 
-function renderUrlTool(header, toast) {
+function renderUrlTool(header, toast, initialUrl) {
   const source = el("textarea", { class: "textarea", id: "url-source", placeholder: "https://example.com/path?q=hello+world" });
+  if (initialUrl) source.value = initialUrl;
   const result = el("pre", { class: "result", id: "url-result" });
   const write = (text, isError = false) => {
     result.classList.toggle("error", isError);

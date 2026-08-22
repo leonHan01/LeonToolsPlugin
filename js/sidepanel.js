@@ -1,10 +1,14 @@
-import { el, icon, faviconImg, restoreFocus } from "./dom.js";
+import { el, icon, faviconImg, restoreFocus, TOOL_ICONS, hasIcon } from "./dom.js";
 import {
   DEFAULT_API_BASE,
   STORAGE_MODE_BACKEND,
   STORAGE_MODE_BROWSER,
   getApiBase,
+  getDeepseekKey,
+  getFeishuSettings,
   getStorageMode,
+  saveDeepseekKey,
+  saveFeishuSettings,
 } from "./settings.js";
 import {
   addPageToCollection,
@@ -31,6 +35,17 @@ import {
   updateItem,
 } from "./storage.js";
 import { applyIdMap, getLastIdMap, syncNow } from "./sync.js";
+import { pushLocalNotes, refreshNotesFromBackend, renderNotesPage } from "./notes.js";
+import { pushLocalTodos, refreshTodosFromBackend, renderTodosPage } from "./todos.js";
+import { pushLocalSessions, refreshSessionsFromBackend, renderChatPage } from "./llm.js";
+import {
+  addToToolbox,
+  deleteToolboxItem,
+  pushLocalToolbox,
+  refreshToolboxFromBackend,
+  renderToolboxSection,
+  updateToolboxItem,
+} from "./toolbox.js";
 import { renderTool, renderToolsHome } from "./tools.js";
 
 const ui = {
@@ -38,6 +53,7 @@ const ui = {
   collectionId: null,
   toolId: null,
   search: "",
+  toolUrl: "",
   toastTimer: 0,
 };
 
@@ -55,7 +71,7 @@ document.querySelectorAll(".tab").forEach((button) => {
 
 const settingsBtn = document.getElementById("settings-btn");
 if (settingsBtn) {
-  settingsBtn.append(icon("gear"));
+  settingsBtn.append(icon("gear"), "设置");
   settingsBtn.addEventListener("click", () => openSettings());
 }
 
@@ -63,7 +79,7 @@ init();
 
 async function init() {
   const savedUi = await loadUi();
-  ui.tab = savedUi.lastTab === "tools" ? "tools" : "collections";
+  ui.tab = ["tools", "notes", "todos", "chat"].includes(savedUi.lastTab) ? savedUi.lastTab : "collections";
   ui.collectionId = savedUi.lastCollectionId || null;
   await refreshState();
   await refreshActiveTab();
@@ -205,6 +221,31 @@ async function openSettings() {
   const backend = el("input", { type: "radio", name: "storage-mode", value: STORAGE_MODE_BACKEND, checked: mode === STORAGE_MODE_BACKEND });
   const browser = el("input", { type: "radio", name: "storage-mode", value: STORAGE_MODE_BROWSER, checked: mode === STORAGE_MODE_BROWSER });
   const apiInput = el("input", { class: "input", id: "api-base", value: base, placeholder: DEFAULT_API_BASE });
+  const currentKey = await getDeepseekKey();
+  const keyInput = el("input", {
+    class: "input",
+    id: "deepseek-key",
+    type: "password",
+    value: currentKey,
+    placeholder: "sk-...",
+    autocomplete: "off",
+  });
+  const feishu = await getFeishuSettings();
+  const webhookInput = el("input", {
+    class: "input",
+    id: "feishu-webhook",
+    value: feishu.url,
+    placeholder: "https://open.feishu.cn/open-apis/bot/v2/hook/...",
+    autocomplete: "off",
+  });
+  const secretInput = el("input", {
+    class: "input",
+    id: "feishu-secret",
+    type: "password",
+    value: feishu.secret,
+    placeholder: "签名校验密钥，未开启可留空",
+    autocomplete: "off",
+  });
   openSheet(
     "设置",
     el(
@@ -213,7 +254,10 @@ async function openSettings() {
       el("div", { class: "field" }, el("label", {}, "数据保存位置")),
       el("label", { class: "choice" }, backend, el("div", {}, el("strong", {}, "后端"), el("small", {}, "能连上 leon_workflow 时写入数据库；连不上则自动保存在浏览器。"))),
       el("label", { class: "choice" }, browser, el("div", {}, el("strong", {}, "仅浏览器"), el("small", {}, "只保存在本机，不访问后端。"))),
-      el("div", { class: "field" }, el("label", {}, "后端地址"), apiInput)
+      el("div", { class: "field" }, el("label", {}, "后端地址"), apiInput),
+      el("div", { class: "field" }, el("label", {}, "DeepSeek API Key"), keyInput),
+      el("div", { class: "field" }, el("label", {}, "飞书 Webhook URL"), webhookInput),
+      el("div", { class: "field" }, el("label", {}, "飞书签名密钥"), secretInput)
     ),
     [
       el("button", { class: "btn ghost", type: "button", onClick: closeSheet }, "取消"),
@@ -226,9 +270,22 @@ async function openSettings() {
             const storageMode = backend.checked ? STORAGE_MODE_BACKEND : STORAGE_MODE_BROWSER;
             const apiBase = apiInput.value.trim().replace(/\/$/, "") || DEFAULT_API_BASE;
             await saveUi({ storageMode, apiBase });
+            const messages = [];
+            try {
+              await saveDeepseekKey(keyInput.value);
+              messages.push("DeepSeek Key 已保存");
+            } catch (error) {
+              messages.push(error instanceof Error ? error.message : "DeepSeek Key 未能写入数据库");
+            }
+            try {
+              await saveFeishuSettings(webhookInput.value, secretInput.value);
+              messages.push("飞书 Webhook 已保存");
+            } catch (error) {
+              messages.push(error instanceof Error ? error.message : "飞书配置未能写入数据库");
+            }
             closeSheet();
             if (storageMode === STORAGE_MODE_BACKEND) await syncInBackground();
-            toast(storageMode === STORAGE_MODE_BACKEND ? "已改为保存到后端" : "已改为保存在浏览器");
+            toast(messages.join("；"));
           },
         },
         "保存"
@@ -238,9 +295,25 @@ async function openSettings() {
 }
 
 function render() {
+  contentEl.classList.toggle("notes-mode", ui.tab === "notes" || ui.tab === "chat" || ui.tab === "todos");
   if (ui.tab === "tools") renderTools();
+  else if (ui.tab === "notes") renderNotes();
+  else if (ui.tab === "todos") renderTodos();
+  else if (ui.tab === "chat") renderChat();
   else if (ui.collectionId) renderCollectionDetail();
   else renderCollectionList();
+}
+
+function renderChat() {
+  contentEl.replaceChildren(renderChatPage({ toast, confirmDelete, openSheet, closeSheet }));
+}
+
+function renderNotes() {
+  contentEl.replaceChildren(renderNotesPage({ toast, confirmDelete, openSheet, closeSheet }));
+}
+
+function renderTodos() {
+  contentEl.replaceChildren(renderTodosPage({ toast, confirmDelete, openSheet, closeSheet }));
 }
 
 async function syncInBackground() {
@@ -254,6 +327,13 @@ async function syncInBackground() {
         saveUi({ lastCollectionId: mapped });
       }
     }
+    await pushLocalNotes();
+    await pushLocalTodos();
+    await pushLocalToolbox();
+    await pushLocalSessions();
+    await refreshNotesFromBackend();
+    await refreshTodosFromBackend();
+    await refreshSessionsFromBackend();
     await refreshState();
     render();
   } finally {
@@ -596,7 +676,7 @@ function openCollectionSheet(collection = null, { addPage } = {}) {
             } else {
               const created = await createCollection({ name: name.value, description: description.value });
               ui.collectionId = created.id;
-              saveUi({ lastCollectionId: created.id, lastTab: "collections" });
+              saveUi({ lastCollectionId: created.id, lastTab: ui.tab });
               if (addPage?.url) {
                 await addPageToCollection(created.id, created.groups[0].id, addPage);
                 toast("已创建集合并加入当前页");
@@ -675,7 +755,7 @@ function openAddSheet(page, preferredCollectionId = ui.collectionId) {
               const created = await createCollection({ name: name.value, description: "" });
               await addPageToCollection(created.id, created.groups[0].id, page);
               ui.collectionId = created.id;
-              saveUi({ lastCollectionId: created.id, lastTab: "collections" });
+              saveUi({ lastCollectionId: created.id, lastTab: ui.tab });
               closeSheet();
               toast("已加入集合");
               await refreshState();
@@ -736,7 +816,7 @@ function openAddSheet(page, preferredCollectionId = ui.collectionId) {
               note: note.value,
             });
             ui.collectionId = collectionSelect.value;
-            saveUi({ lastCollectionId: ui.collectionId, lastTab: "collections" });
+            saveUi({ lastCollectionId: ui.collectionId, lastTab: ui.tab });
             closeSheet();
             toast(result.duplicated ? "该网页已在集合中" : "已加入集合");
             await refreshState();
@@ -833,14 +913,148 @@ async function confirmDeleteItem(collection, item) {
   render();
 }
 
+function openToolboxEdit(item) {
+  const title = el("input", { class: "input", value: item.title });
+  const url = el("input", { class: "input", value: item.url });
+  let selectedIcon = hasIcon(item.icon) ? item.icon : "favicon";
+  const grid = el("div", { class: "icon-picker" });
+
+  function renderPicker() {
+    grid.replaceChildren(
+      ...TOOL_ICONS.map((entry) => {
+        const active = selectedIcon === entry.id;
+        const mark =
+          entry.id === "favicon"
+            ? faviconImg(url.value.trim() || item.url, item.favIconUrl, "favicon")
+            : icon(entry.id);
+        const btn = el(
+          "button",
+          { class: `icon-pick${active ? " active" : ""}`, type: "button", title: entry.label },
+          mark
+        );
+        btn.addEventListener("click", () => {
+          selectedIcon = entry.id;
+          renderPicker();
+        });
+        return btn;
+      })
+    );
+  }
+
+  renderPicker();
+  url.addEventListener("change", () => {
+    if (selectedIcon === "favicon") renderPicker();
+  });
+
+  openSheet(
+    "编辑工具",
+    el(
+      "div",
+      { class: "stack" },
+      el("div", { class: "field" }, el("label", {}, "名称"), title),
+      el("div", { class: "field" }, el("label", {}, "网址"), url),
+      el("div", { class: "field" }, el("label", {}, "图标"), grid)
+    ),
+    [
+      el("button", { class: "btn ghost", type: "button", onClick: closeSheet }, "取消"),
+      el(
+        "button",
+        {
+          class: "btn primary",
+          type: "button",
+          onClick: async () => {
+            if (!title.value.trim() || !url.value.trim()) return;
+            await updateToolboxItem(item.id, {
+              title: title.value,
+              url: url.value,
+              icon: selectedIcon === "favicon" ? "" : selectedIcon,
+            });
+            closeSheet();
+            await renderTools();
+          },
+        },
+        "保存"
+      ),
+    ]
+  );
+}
+
+async function removeToolboxItem(item) {
+  const ok = await confirmDelete(`确定从工具箱移除「${item.title}」吗？此操作不可恢复。`);
+  if (!ok) return;
+  await deleteToolboxItem(item.id);
+  await renderTools();
+}
+
 function toolsAddBar() {
-  return el("div", { class: "toolbar tools-toolbar" }, addCurrentPageButton(null));
+  const input = el("input", {
+    class: "input",
+    id: "tool-url",
+    placeholder: "当前页面网址",
+    value: ui.toolUrl || "",
+    onInput: (event) => {
+      ui.toolUrl = event.target.value;
+    },
+  });
+  return el(
+    "div",
+    { class: "toolbar" },
+    input,
+    el(
+      "button",
+      {
+        class: "btn success icon",
+        type: "button",
+        title: "加入当前页面到工具箱",
+        onClick: async () => {
+          await refreshActiveTab();
+          const live = pageFromTab();
+          const typed = input.value.trim();
+          const page = live?.url && (!typed || typed === live.url)
+            ? live
+            : typed
+              ? { title: hostnameOf(typed) || typed, url: typed, favIconUrl: "" }
+              : live;
+          if (!page?.url) {
+            toast("没有可加入的网页");
+            return;
+          }
+          ui.toolUrl = page.url;
+          input.value = page.url;
+          const urlInput = document.getElementById("url-source");
+          if (urlInput) urlInput.value = page.url;
+          try {
+            const result = await addToToolbox(page);
+            toast(result.duplicated ? "该页面已在工具箱中" : "已加入工具箱");
+            if (!ui.toolId) await renderTools();
+          } catch (error) {
+            toast(error instanceof Error ? error.message : "加入工具箱失败");
+          }
+        },
+      },
+      icon("download")
+    )
+  );
 }
 
 async function renderTools() {
+  await refreshActiveTab();
+  if (!ui.toolUrl) {
+    const page = pageFromTab();
+    if (page?.url) ui.toolUrl = page.url;
+  }
   if (!ui.toolId) {
+    const toolbox = await refreshToolboxFromBackend();
     contentEl.replaceChildren(
       toolsAddBar(),
+      el("div", { class: "section-label" }, "我的工具"),
+      renderToolboxSection({
+        items: toolbox.items,
+        onOpen: (item) => openOrFocusTab(item.url),
+        onEdit: (item) => openToolboxEdit(item),
+        onDelete: (item) => removeToolboxItem(item),
+      }),
+      el("div", { class: "section-label" }, "内置工具"),
       renderToolsHome((id) => {
         ui.toolId = id;
         renderTools();
@@ -852,6 +1066,7 @@ async function renderTools() {
     getActiveTab,
     toast,
     confirmDelete,
+    initialUrl: ui.toolUrl,
     goHome: () => {
       ui.toolId = null;
       renderTools();

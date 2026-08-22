@@ -151,3 +151,95 @@ export function reorderItems(collectionId, groupId, itemIds) {
     body: { itemIds: itemIds.map(Number) },
   });
 }
+
+export function listNotes() {
+  return apiRequest("/api/notes");
+}
+
+export function createNote(payload) {
+  return apiRequest("/api/notes", { method: "POST", body: payload });
+}
+
+export function updateNote(id, payload) {
+  return apiRequest(`/api/notes/${id}`, { method: "PUT", body: payload });
+}
+
+export function deleteNote(id) {
+  return apiRequest(`/api/notes/${id}`, { method: "DELETE" });
+}
+
+export function listTodos() {
+  return apiRequest("/api/todos");
+}
+
+export function createTodo(payload) {
+  return apiRequest("/api/todos", { method: "POST", body: payload });
+}
+
+export function updateTodo(id, payload) {
+  return apiRequest(`/api/todos/${id}`, { method: "PUT", body: payload });
+}
+
+export function deleteTodo(id) {
+  return apiRequest(`/api/todos/${id}`, { method: "DELETE" });
+}
+
+export function listToolbox() {
+  return apiRequest("/api/toolbox");
+}
+
+export function createToolboxItem(payload) {
+  return apiRequest("/api/toolbox", { method: "POST", body: payload });
+}
+
+export function updateToolboxItem(id, payload) {
+  return apiRequest(`/api/toolbox/${id}`, { method: "PUT", body: payload });
+}
+
+export function deleteToolboxItem(id) {
+  return apiRequest(`/api/toolbox/${id}`, { method: "DELETE" });
+}
+
+export function listChatSessions() {
+  return apiRequest("/api/llm-sessions");
+}
+
+export async function listChatSessionsFull() {
+  try {
+    return await apiRequest("/api/llm-sessions/full");
+  } catch {
+    const list = await listChatSessions();
+    const details = [];
+    for (const row of list || []) {
+      details.push(await getChatSession(row.id));
+    }
+    return details;
+  }
+}
+
+export function createChatSession(payload = {}) {
+  return apiRequest("/api/llm-sessions", { method: "POST", body: payload });
+}
+
+export function getChatSession(id) {
+  return apiRequest(`/api/llm-sessions/${id}`);
+}
+
+export function addChatMessage(sessionId, payload) {
+  return apiRequest(`/api/llm-sessions/${sessionId}/messages`, { method: "POST", body: payload });
+}
+
+export function deleteChatSession(id) {
+  return apiRequest(`/api/llm-sessions/${id}`, { method: "DELETE" });
+}
+
+export function getAppSetting(key) {
+  return apiRequest(`/api/app-settings/${encodeURIComponent(key)}`);
+}
+
+export function saveAppSetting(key, value) {
+  return apiRequest(`/api/app-settings/${encodeURIComponent(key)}`, {
+    method: "PUT",
+    body: { value: value ?? "" },
+  });
+}
