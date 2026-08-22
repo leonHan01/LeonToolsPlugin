@@ -10,9 +10,26 @@ export async function withBackend(failMessage, work) {
   try {
     const result = await work();
     await api.markAvailability(true);
-    return result;
+    return result === undefined ? true : result;
   } catch (error) {
     await api.markAvailability(false, error instanceof Error ? error.message : failMessage);
     return undefined;
+  }
+}
+
+export async function pushDirtyRecords(items, { create, update }) {
+  for (const item of items) {
+    try {
+      if (!api.isRemoteId(item.id)) {
+        const remote = await create(item);
+        item.id = String(remote.id);
+        item.dirty = false;
+      } else if (item.dirty) {
+        await update(item);
+        item.dirty = false;
+      }
+    } catch {
+      /* keep local */
+    }
   }
 }

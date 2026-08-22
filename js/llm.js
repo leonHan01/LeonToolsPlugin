@@ -17,7 +17,7 @@ function clipTitle(text) {
   return api.clip(String(text || "").trim().replace(/\s+/g, " "), 40);
 }
 
-function fromRemoteMessage(message) {
+export function fromRemoteMessage(message) {
   return {
     id: String(message.id),
     role: message.role,
@@ -28,7 +28,7 @@ function fromRemoteMessage(message) {
   };
 }
 
-function fromRemoteSession(session, messages = []) {
+export function fromRemoteSession(session, messages = []) {
   const mapped = messages.map(fromRemoteMessage);
   return {
     id: String(session.id),
@@ -165,7 +165,7 @@ async function pushSessionMessages(session) {
   return session;
 }
 
-function mergeSession(localSession, remoteSession) {
+export function mergeSession(localSession, remoteSession) {
   const remote = fromRemoteSession(remoteSession, remoteSession.messages || []);
   if (!localSession) return remote;
   const extra = localSession.messages.filter((item) => item.dirty || !api.isRemoteId(item.id));
@@ -232,13 +232,12 @@ export async function createSession(title = "新对话") {
   store.currentSessionId = session.id;
   await saveChat(store);
   if (await api.shouldUseBackend()) {
-    try {
-      session = await ensureRemoteSession(store, session);
+    const remote = await withBackend("新建对话失败", async () => {
+      const next = await ensureRemoteSession(store, session);
       await saveChat(store);
-      await api.markAvailability(true);
-    } catch (error) {
-      await api.markAvailability(false, error instanceof Error ? error.message : "新建对话失败");
-    }
+      return next;
+    });
+    if (remote) session = remote;
   }
   return session;
 }
@@ -248,18 +247,16 @@ export async function loadSession(sessionId) {
   let session = findSession(store, sessionId);
   if (!session) throw new Error("对话不存在");
   if (await api.shouldUseBackend()) {
-    try {
-      session = await ensureRemoteSession(store, session);
-      await pushSessionMessages(session);
-      if (api.isRemoteId(session.id)) {
-        const remote = await api.getChatSession(session.id);
-        session = mergeSession(session, remote);
+    const hydrated = await withBackend("加载对话失败", async () => {
+      let next = await ensureRemoteSession(store, session);
+      await pushSessionMessages(next);
+      if (api.isRemoteId(next.id)) {
+        next = mergeSession(next, await api.getChatSession(next.id));
       }
-      upsertSession(store, session);
-      await api.markAvailability(true);
-    } catch (error) {
-      await api.markAvailability(false, error instanceof Error ? error.message : "加载对话失败");
-    }
+      upsertSession(store, next);
+      return next;
+    });
+    if (hydrated) session = hydrated;
   }
   store.currentSessionId = session.id;
   await saveChat(store);
@@ -271,12 +268,7 @@ export async function deleteSession(sessionId) {
   const session = findSession(store, sessionId);
   if (!session) return store;
   if (await api.shouldUseBackend() && api.isRemoteId(session.id)) {
-    try {
-      await api.deleteChatSession(session.id);
-      await api.markAvailability(true);
-    } catch (error) {
-      await api.markAvailability(false, error instanceof Error ? error.message : "删除对话失败");
-    }
+    await withBackend("删除对话失败", () => api.deleteChatSession(session.id));
   }
   store.sessions = store.sessions.filter((item) => String(item.id) !== String(session.id));
   if (String(store.currentSessionId) === String(session.id)) {
@@ -313,14 +305,12 @@ export async function appendMessage(partial) {
   store.currentSessionId = session.id;
   await saveChat(store);
   if (await api.shouldUseBackend()) {
-    try {
+    await withBackend("保存对话失败", async () => {
       session = await ensureRemoteSession(store, session);
       await pushSessionMessages(session);
       await saveChat(store);
-      await api.markAvailability(true);
-    } catch (error) {
-      await api.markAvailability(false, error instanceof Error ? error.message : "保存对话失败");
-    }
+      return true;
+    });
   }
   return { session, message };
 }

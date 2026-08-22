@@ -1,6 +1,6 @@
 import * as api from "./api.js";
 import { el, icon, faviconImg, hasIcon } from "./dom.js";
-import { mergeDirtyWithRemote, withBackend } from "./persist.js";
+import { mergeDirtyWithRemote, pushDirtyRecords, withBackend } from "./persist.js";
 import { TOOLBOX_KEY } from "./settings.js";
 import { hostnameOf, normalizeUrl, uid } from "./storage.js";
 
@@ -121,30 +121,22 @@ export async function deleteToolboxItem(itemId) {
 export async function pushLocalToolbox() {
   if (!(await api.shouldUseBackend(true))) return;
   const state = await loadToolbox();
-  for (const item of [...state.items]) {
-    try {
-      if (!api.isRemoteId(item.id)) {
-        const remote = await api.createToolboxItem({
-          name: item.title,
-          url: item.url,
-          favIconUrl: item.favIconUrl || "",
-          icon: item.icon || "",
-        });
-        item.id = String(remote.id);
-        item.dirty = false;
-      } else if (item.dirty) {
-        await api.updateToolboxItem(item.id, {
-          name: item.title,
-          url: item.url,
-          favIconUrl: item.favIconUrl || "",
-          icon: item.icon || "",
-        });
-        item.dirty = false;
-      }
-    } catch {
-      /* keep local */
-    }
-  }
+  await pushDirtyRecords(state.items, {
+    create: (item) =>
+      api.createToolboxItem({
+        name: item.title,
+        url: item.url,
+        favIconUrl: item.favIconUrl || "",
+        icon: item.icon || "",
+      }),
+    update: (item) =>
+      api.updateToolboxItem(item.id, {
+        name: item.title,
+        url: item.url,
+        favIconUrl: item.favIconUrl || "",
+        icon: item.icon || "",
+      }),
+  });
   await saveToolbox(state);
 }
 
@@ -157,7 +149,7 @@ export function toolboxMark(item, className = "favicon") {
   return faviconImg(item.url, item.favIconUrl, className);
 }
 
-export function renderToolboxSection({ items, onOpen, onEdit, onDelete }) {
+export function renderToolboxSection({ items, onOpen, onEdit, onDelete, currentItemId } = {}) {
   if (!items.length) {
     return el("div", { class: "toolbox-empty muted" }, "还没有收藏到工具箱的页面，点绿色按钮把当前页加进来。");
   }
@@ -167,7 +159,11 @@ export function renderToolboxSection({ items, onOpen, onEdit, onDelete }) {
     items.map((item) =>
       el(
         "article",
-        { class: "tool-card toolbox-card" },
+        {
+          class: `tool-card toolbox-card${String(item.id) === String(currentItemId) ? " current-page" : ""}`,
+          dataset: { itemId: String(item.id) },
+          "aria-current": String(item.id) === String(currentItemId) ? "true" : null,
+        },
         el(
           "button",
           { class: "toolbox-main", type: "button", title: item.title, onClick: () => onOpen(item) },

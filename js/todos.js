@@ -1,7 +1,7 @@
 import * as api from "./api.js";
 import { el, icon } from "./dom.js";
 import { notifyTodoCompleted, notifyTodoCreated } from "./feishu.js";
-import { mergeDirtyWithRemote, withBackend } from "./persist.js";
+import { mergeDirtyWithRemote, pushDirtyRecords, withBackend } from "./persist.js";
 import { TODOS_KEY } from "./settings.js";
 import { uid } from "./storage.js";
 import { renderAnalysisBar } from "./work-analysis.js";
@@ -116,21 +116,14 @@ export async function deleteTodo(todoId) {
 export async function pushLocalTodos() {
   if (!(await api.shouldUseBackend(true))) return;
   const state = await loadTodos();
-  for (const item of [...state.todos]) {
-    try {
-      if (!api.isRemoteId(item.id)) {
-        const remote = await api.createTodo({ content: item.content });
-        item.id = String(remote.id);
-        if (item.done) await api.updateTodo(item.id, { content: item.content, done: true });
-        item.dirty = false;
-      } else if (item.dirty) {
-        await api.updateTodo(item.id, { content: item.content, done: item.done });
-        item.dirty = false;
-      }
-    } catch {
-      /* keep local */
-    }
-  }
+  await pushDirtyRecords(state.todos, {
+    create: async (item) => {
+      const remote = await api.createTodo({ content: item.content });
+      if (item.done) await api.updateTodo(String(remote.id), { content: item.content, done: true });
+      return remote;
+    },
+    update: (item) => api.updateTodo(item.id, { content: item.content, done: item.done }),
+  });
   await saveTodos(state);
 }
 

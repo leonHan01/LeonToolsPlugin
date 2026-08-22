@@ -31,4 +31,6 @@ test("ensureTldr prefixes missing summary", () => {
   assert.equal(withPrefix.startsWith("TL;DR："), true);
   const added = ensureTldr("今天优先补覆盖率");
   assert.equal(added.startsWith("TL;DR：今天优先补覆盖率"), true);
+  const english = ensureTldr("TL;DR: ship tests");
+  assert.equal(english.startsWith("TL;DR："), true);
 });

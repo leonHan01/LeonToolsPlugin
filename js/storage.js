@@ -1,4 +1,5 @@
 import * as api from "./api.js";
+import { withBackend } from "./persist.js";
 import { PENDING_KEY, STORAGE_KEY, STORAGE_MODE_BACKEND, getStorageMode, loadUi, queueDelete, saveUi } from "./settings.js";
 
 export { loadUi, saveUi };
@@ -100,11 +101,28 @@ export function findItemByUrl(state, url, collectionId) {
     ? state.collections.filter((item) => sameId(item.id, collectionId))
     : state.collections;
   for (const collection of collections) {
-    for (const group of collection.groups) {
-      const item = group.items.find((entry) => normalizeUrl(entry.url) === target);
+    for (const group of collection.groups || []) {
+      const item = (group.items || []).find((entry) => normalizeUrl(entry.url) === target);
       if (item) return { collection, group, item };
     }
   }
+  return null;
+}
+
+export function matchSavedCard(url, collections = [], toolboxItems = []) {
+  if (!url) return null;
+  const found = findItemByUrl({ collections }, url);
+  if (found) {
+    return {
+      kind: "collection",
+      collectionId: found.collection.id,
+      groupId: found.group.id,
+      itemId: found.item.id,
+    };
+  }
+  const target = normalizeUrl(url);
+  const tool = toolboxItems.find((item) => item?.url && normalizeUrl(item.url) === target);
+  if (tool) return { kind: "toolbox", itemId: tool.id };
   return null;
 }
 
@@ -155,23 +173,20 @@ export function fromRemoteCollection(remote, extras = {}) {
 
 export async function createCollection(fields) {
   if (await api.shouldUseBackend()) {
-    try {
+    const created = await withBackend("保存到后端失败", async () => {
       const remote = await api.createCollection({
         name: api.clip(fields.name, 200),
         description: fields.description || "",
         icon: fields.icon || "",
       });
       const collection = fromRemoteCollection(remote, { color: fields.color, icon: fields.icon || "" });
-      await withState((state) => {
+      return withState((state) => {
         state.collections.unshift(collection);
         reindex(state.collections);
         return collection;
       });
-      await api.markAvailability(true);
-      return collection;
-    } catch (error) {
-      await api.markAvailability(false, error instanceof Error ? error.message : "保存到后端失败");
-    }
+    });
+    if (created) return created;
   }
   const collection = emptyCollection(fields);
   return withState((state) => {
@@ -194,19 +209,18 @@ export async function updateCollection(collectionId, patch) {
     return collection;
   });
   if (api.isRemoteId(collectionId) && (await api.shouldUseBackend())) {
-    try {
-      await api.updateCollection(collectionId, {
+    const saved = await withBackend("更新后端失败", () =>
+      api.updateCollection(collectionId, {
         name: api.clip(updated.name, 200),
         description: updated.description || "",
         icon: updated.icon || "",
-      });
+      })
+    );
+    if (saved !== undefined) {
       await withState((state) => {
         const collection = findCollection(state, collectionId);
         if (collection) collection.dirty = false;
       });
-      await api.markAvailability(true);
-    } catch (error) {
-      await api.markAvailability(false, error instanceof Error ? error.message : "更新后端失败");
     }
   }
   return updated;
@@ -218,13 +232,8 @@ export async function deleteCollection(collectionId) {
   });
   if (!api.isRemoteId(collectionId)) return;
   if (await api.shouldUseBackend()) {
-    try {
-      await api.deleteCollection(collectionId);
-      await api.markAvailability(true);
-      return;
-    } catch (error) {
-      await api.markAvailability(false, error instanceof Error ? error.message : "删除后端失败");
-    }
+    const saved = await withBackend("删除后端失败", () => api.deleteCollection(collectionId));
+    if (saved !== undefined) return;
   }
   if ((await getStorageMode()) === STORAGE_MODE_BACKEND) {
     await queueDelete({ kind: "collection", collectionId: String(collectionId) });
@@ -234,22 +243,19 @@ export async function deleteCollection(collectionId) {
 export async function createGroup(collectionId, name) {
   const groupName = (name || "").trim() || "未命名分组";
   if (api.isRemoteId(collectionId) && (await api.shouldUseBackend())) {
-    try {
+    const group = await withBackend("创建分组失败", async () => {
       const remote = await api.createGroup(collectionId, { name: api.clip(groupName, 120) });
-      const group = { id: String(remote.id), name: remote.name, items: [], dirty: false };
+      const created = { id: String(remote.id), name: remote.name, items: [], dirty: false };
       await withState((state) => {
         const collection = findCollection(state, collectionId);
         if (!collection) throw new Error("集合不存在");
-        collection.groups.push(group);
+        collection.groups.push(created);
         reindex(collection.groups);
         collection.updatedAt = now();
-        return group;
       });
-      await api.markAvailability(true);
-      return group;
-    } catch (error) {
-      await api.markAvailability(false, error instanceof Error ? error.message : "创建分组失败");
-    }
+      return created;
+    });
+    if (group) return group;
   }
   return withState((state) => {
     const collection = findCollection(state, collectionId);
@@ -275,16 +281,13 @@ export async function renameGroup(collectionId, groupId, name) {
     return current;
   });
   if (api.isRemoteId(collectionId) && api.isRemoteId(groupId) && (await api.shouldUseBackend())) {
-    try {
+    await withBackend("更新分组失败", async () => {
       await api.updateGroup(collectionId, groupId, { name: api.clip(group.name, 120) });
       await withState((state) => {
         const current = findGroup(findCollection(state, collectionId), groupId);
         if (current) current.dirty = false;
       });
-      await api.markAvailability(true);
-    } catch (error) {
-      await api.markAvailability(false, error instanceof Error ? error.message : "更新分组失败");
-    }
+    });
   }
   return group;
 }
@@ -299,13 +302,8 @@ export async function deleteGroup(collectionId, groupId) {
   });
   if (!api.isRemoteId(collectionId) || !api.isRemoteId(groupId)) return;
   if (await api.shouldUseBackend()) {
-    try {
-      await api.deleteGroup(collectionId, groupId);
-      await api.markAvailability(true);
-      return;
-    } catch (error) {
-      await api.markAvailability(false, error instanceof Error ? error.message : "删除分组失败");
-    }
+    const saved = await withBackend("删除分组失败", () => api.deleteGroup(collectionId, groupId));
+    if (saved !== undefined) return;
   }
   if ((await getStorageMode()) === STORAGE_MODE_BACKEND) {
     await queueDelete({ kind: "group", collectionId: String(collectionId), groupId: String(groupId) });
@@ -331,7 +329,7 @@ export async function addPageToCollection(collectionId, groupId, page) {
   if (existing) return { collection: existing.collection, group: existing.group, item: existing.item, duplicated: true };
 
   if (api.isRemoteId(collectionId) && api.isRemoteId(groupId) && (await api.shouldUseBackend())) {
-    try {
+    const result = await withBackend("加入后端失败", async () => {
       const remote = await api.createItem(collectionId, {
         groupId: Number(groupId),
         name: api.clip(page.title || hostnameOf(page.url) || page.url, 200),
@@ -339,7 +337,7 @@ export async function addPageToCollection(collectionId, groupId, page) {
         note: page.note || "",
       });
       const item = fromRemoteItem(remote, page.favIconUrl || "");
-      const result = await withState((state) => {
+      return withState((state) => {
         const collection = findCollection(state, collectionId);
         const group = findGroup(collection, groupId);
         if (!collection || !group) throw new Error("集合或分组不存在");
@@ -348,11 +346,8 @@ export async function addPageToCollection(collectionId, groupId, page) {
         collection.updatedAt = now();
         return { collection, group, item, duplicated: false };
       });
-      await api.markAvailability(true);
-      return result;
-    } catch (error) {
-      await api.markAvailability(false, error instanceof Error ? error.message : "加入后端失败");
-    }
+    });
+    if (result) return result;
   }
 
   return withState((state) => {
@@ -391,7 +386,7 @@ export async function updateItem(collectionId, itemId, patch) {
   const located = locateItem(latest, collectionId, itemId);
   const remoteGroupId = located?.group.id;
   if (api.isRemoteId(collectionId) && api.isRemoteId(itemId) && api.isRemoteId(remoteGroupId) && (await api.shouldUseBackend())) {
-    try {
+    await withBackend("更新网页失败", async () => {
       await api.updateItem(collectionId, itemId, {
         groupId: Number(remoteGroupId),
         name: api.clip(item.title, 200),
@@ -402,10 +397,7 @@ export async function updateItem(collectionId, itemId, patch) {
         const current = locateItem(state, collectionId, itemId);
         if (current) current.item.dirty = false;
       });
-      await api.markAvailability(true);
-    } catch (error) {
-      await api.markAvailability(false, error instanceof Error ? error.message : "更新网页失败");
-    }
+    });
   }
   return item;
 }
@@ -419,13 +411,8 @@ export async function deleteItem(collectionId, itemId) {
   });
   if (!api.isRemoteId(collectionId) || !api.isRemoteId(itemId)) return;
   if (await api.shouldUseBackend()) {
-    try {
-      await api.deleteItem(collectionId, itemId);
-      await api.markAvailability(true);
-      return;
-    } catch (error) {
-      await api.markAvailability(false, error instanceof Error ? error.message : "删除网页失败");
-    }
+    const saved = await withBackend("删除网页失败", () => api.deleteItem(collectionId, itemId));
+    if (saved !== undefined) return;
   }
   if ((await getStorageMode()) === STORAGE_MODE_BACKEND) {
     await queueDelete({ kind: "item", collectionId: String(collectionId), itemId: String(itemId) });
@@ -532,12 +519,7 @@ export async function reorderItems(collectionId, groupId, draggedId, targetId) {
 
 async function persistRemoteOrder(send) {
   if (!(await api.shouldUseBackend())) return;
-  try {
-    await send();
-    await api.markAvailability(true);
-  } catch (error) {
-    await api.markAvailability(false, error instanceof Error ? error.message : "保存排序失败");
-  }
+  await withBackend("保存排序失败", send);
 }
 
 export async function exportJson() {
@@ -594,6 +576,7 @@ function remapCollection(raw) {
     id: uid(),
     name: raw.name || "导入的集合",
     description: raw.description || "",
+    icon: raw.icon || "",
     color: raw.color || COLORS[0],
     createdAt: now(),
     updatedAt: now(),

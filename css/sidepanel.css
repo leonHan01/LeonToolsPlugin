@@ -419,6 +419,22 @@ button {
   background: var(--color-surface-soft);
 }
 
+.item-row.current-page,
+.toolbox-card.current-page {
+  background: var(--color-primary-soft);
+  box-shadow: inset 3px 0 0 var(--color-primary);
+}
+
+.toolbox-card.current-page {
+  border-color: var(--color-primary);
+}
+
+.item-row.current-page:hover,
+.toolbox-card.current-page:hover {
+  background: var(--color-primary-soft);
+  border-color: var(--color-primary);
+}
+
 .collection-card .head {
   display: grid;
   grid-template-columns: 18px 20px minmax(0, 1fr);

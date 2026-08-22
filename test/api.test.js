@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { clip, isRemoteId, parseTime } from "../js/api.js";
+import { apiRequest, clip, isRemoteId, parseTime } from "../js/api.js";
+import { installChrome, browserUi } from "./helpers.js";
 
 test("isRemoteId accepts numeric backend ids only", () => {
   assert.equal(isRemoteId("12"), true);
@@ -25,4 +26,53 @@ test("parseTime handles number, array, string and fallback", () => {
   assert.equal(Number.isNaN(fromIso), false);
   const fallback = parseTime("not-a-date");
   assert.equal(typeof fallback, "number");
+});
+
+test("apiRequest unwraps wrapped data", async () => {
+  installChrome({ local: { "myWorkflow.ui": browserUi() } });
+  const original = globalThis.fetch;
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    headers: { get: () => "application/json" },
+    json: async () => ({ success: true, data: { id: 1 } }),
+  });
+  try {
+    const data = await apiRequest("/api/notes");
+    assert.equal(data.id, 1);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("apiRequest throws backend message", async () => {
+  installChrome({ local: { "myWorkflow.ui": browserUi() } });
+  const original = globalThis.fetch;
+  globalThis.fetch = async () => ({
+    ok: false,
+    status: 400,
+    headers: { get: () => "application/json" },
+    json: async () => ({ success: false, message: "便签内容不能为空" }),
+  });
+  try {
+    await assert.rejects(() => apiRequest("/api/notes", { method: "POST", body: {} }), /便签内容不能为空/);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("apiRequest throws when success is false", async () => {
+  installChrome({ local: { "myWorkflow.ui": browserUi() } });
+  const original = globalThis.fetch;
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    headers: { get: () => "application/json" },
+    json: async () => ({ success: false, message: "请求失败" }),
+  });
+  try {
+    await assert.rejects(() => apiRequest("/api/notes"), /请求失败/);
+  } finally {
+    globalThis.fetch = original;
+  }
 });

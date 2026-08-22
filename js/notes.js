@@ -1,7 +1,7 @@
 import * as api from "./api.js";
 import { el, icon } from "./dom.js";
 import { notifyNoteCreated } from "./feishu.js";
-import { mergeDirtyWithRemote, withBackend } from "./persist.js";
+import { mergeDirtyWithRemote, pushDirtyRecords, withBackend } from "./persist.js";
 import { NOTES_KEY } from "./settings.js";
 import { formatDateTime, uid } from "./storage.js";
 import { renderAnalysisBar } from "./work-analysis.js";
@@ -102,20 +102,10 @@ export async function deleteNote(noteId) {
 export async function pushLocalNotes() {
   if (!(await api.shouldUseBackend(true))) return;
   const state = await loadNotes();
-  for (const note of [...state.notes]) {
-    try {
-      if (!api.isRemoteId(note.id)) {
-        const remote = await api.createNote({ content: note.content });
-        note.id = String(remote.id);
-        note.dirty = false;
-      } else if (note.dirty) {
-        await api.updateNote(note.id, { content: note.content });
-        note.dirty = false;
-      }
-    } catch {
-      /* keep local */
-    }
-  }
+  await pushDirtyRecords(state.notes, {
+    create: (note) => api.createNote({ content: note.content }),
+    update: (note) => api.updateNote(note.id, { content: note.content }),
+  });
   await saveNotes(state);
 }
 

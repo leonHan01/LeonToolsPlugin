@@ -24,6 +24,7 @@ import {
   hostnameOf,
   loadState,
   loadUi,
+  matchSavedCard,
   readPendingAdd,
   renameGroup,
   reorderCollections,
@@ -42,6 +43,7 @@ import { pushLocalSessions, refreshSessionsFromBackend, renderChatPage } from ".
 import {
   addToToolbox,
   deleteToolboxItem,
+  loadToolbox,
   pushLocalToolbox,
   refreshToolboxFromBackend,
   renderToolboxSection,
@@ -55,6 +57,7 @@ const ui = {
   toolId: null,
   search: "",
   toolUrl: "",
+  highlight: null,
   toastTimer: 0,
 };
 
@@ -85,22 +88,25 @@ async function init() {
   await refreshState();
   await refreshActiveTab();
   await consumePendingAdd();
+  await revealCurrentPage();
   render();
   syncTabButtons();
   syncInBackground();
 
-  chrome.tabs.onActivated.addListener(refreshActiveTabAndRender);
+  chrome.tabs.onActivated.addListener(() => refreshActiveTabAndRender({ follow: true }));
   chrome.tabs.onUpdated.addListener((_id, info, tab) => {
-    if (tab.active && (info.title || info.url || info.favIconUrl || info.status === "complete")) {
-      refreshActiveTabAndRender();
-    }
+    if (!tab.active) return;
+    if (info.url) refreshActiveTabAndRender({ follow: true });
+    else if (info.title || info.favIconUrl || info.status === "complete") refreshActiveTab();
   });
   chrome.storage.session.onChanged.addListener((changes) => {
     if (changes.pendingAdd) consumePendingAdd();
   });
   chrome.storage.local.onChanged.addListener((changes) => {
     if (applyingRemote) return;
-    if (changes["myWorkflow.v1"]) refreshState().then(render);
+    if (changes["myWorkflow.v1"] || changes["myWorkflow.toolbox.v1"]) {
+      refreshView({ follow: true });
+    }
   });
 }
 
@@ -124,7 +130,7 @@ async function refreshActiveTab() {
   currentTab = await getActiveTab();
 }
 
-async function refreshActiveTabAndRender() {
+async function refreshActiveTabAndRender({ follow = false } = {}) {
   const active = document.activeElement;
   const focus = {
     id: active?.id,
@@ -132,7 +138,44 @@ async function refreshActiveTabAndRender() {
     end: active?.selectionEnd,
   };
   await refreshActiveTab();
-  restoreFocus(focus.id, focus.start, focus.end);
+  if (follow) await revealCurrentPage();
+  render();
+  syncTabButtons();
+  if (!follow) restoreFocus(focus.id, focus.start, focus.end);
+}
+
+async function revealCurrentPage() {
+  if (sheetRoot.children.length) return;
+  const page = pageFromTab();
+  const toolbox = await loadToolbox();
+  const match = matchSavedCard(page?.url, state.collections, toolbox.items);
+  ui.highlight = match;
+  if (!match) return;
+  if (match.kind === "collection") {
+    const changed = ui.tab !== "collections" || !sameId(ui.collectionId, match.collectionId);
+    ui.tab = "collections";
+    ui.collectionId = match.collectionId;
+    ui.search = "";
+    if (changed) saveUi({ lastTab: "collections", lastCollectionId: match.collectionId });
+    return;
+  }
+  const changed = ui.tab !== "tools" || ui.toolId;
+  ui.tab = "tools";
+  ui.toolId = null;
+  if (changed) saveUi({ lastTab: "tools", lastCollectionId: ui.collectionId });
+}
+
+function scrollToCurrentPage() {
+  queueMicrotask(() => {
+    document.querySelector(".current-page")?.scrollIntoView({ block: "center" });
+  });
+}
+
+async function refreshView({ follow = false } = {}) {
+  await refreshState();
+  if (follow) await revealCurrentPage();
+  render();
+  syncTabButtons();
 }
 
 async function consumePendingAdd() {
@@ -335,8 +378,7 @@ async function syncInBackground() {
     await refreshNotesFromBackend();
     await refreshTodosFromBackend();
     await refreshSessionsFromBackend();
-    await refreshState();
-    render();
+    await refreshView({ follow: true });
   } finally {
     applyingRemote = false;
   }
@@ -567,6 +609,7 @@ function renderCollectionDetail() {
       ),
     ].filter(Boolean)
   );
+  scrollToCurrentPage();
 }
 
 function renderGroup(collection, group, keyword) {
@@ -613,9 +656,14 @@ function renderGroup(collection, group, keyword) {
 }
 
 function itemRow(collection, group, item, canDrag) {
+  const current = ui.highlight?.kind === "collection" && sameId(ui.highlight.itemId, item.id);
   const row = el(
     "div",
-    { class: "item-row" },
+    {
+      class: `item-row${current ? " current-page" : ""}`,
+      dataset: { itemId: String(item.id) },
+      "aria-current": current ? "true" : null,
+    },
     canDrag ? dragHandle({ type: "item", id: item.id, groupId: group.id }) : el("span", { class: "drag-handle" }),
     faviconImg(item.url, item.favIconUrl),
     el(
@@ -711,8 +759,7 @@ function openCollectionSheet(collection = null, { addPage } = {}) {
               }
             }
             closeSheet();
-            await refreshState();
-            render();
+            await refreshView({ follow: Boolean(addPage?.url) });
           },
         },
         "保存"
@@ -786,8 +833,7 @@ function openAddSheet(page, preferredCollectionId = ui.collectionId) {
               saveUi({ lastCollectionId: created.id, lastTab: ui.tab });
               closeSheet();
               toast("已加入集合");
-              await refreshState();
-              render();
+              await refreshView({ follow: true });
             },
           },
           "创建并加入"
@@ -847,8 +893,7 @@ function openAddSheet(page, preferredCollectionId = ui.collectionId) {
             saveUi({ lastCollectionId: ui.collectionId, lastTab: ui.tab });
             closeSheet();
             toast(result.duplicated ? "该网页已在集合中" : "已加入集合");
-            await refreshState();
-            render();
+            await refreshView({ follow: true });
           },
         },
         "加入"
@@ -1036,6 +1081,7 @@ function toolsAddBar() {
           try {
             const result = await addToToolbox(page);
             toast(result.duplicated ? "该页面已在工具箱中" : "已加入工具箱");
+            await revealCurrentPage();
             if (!ui.toolId) await renderTools();
           } catch (error) {
             toast(error instanceof Error ? error.message : "加入工具箱失败");
@@ -1060,6 +1106,7 @@ async function renderTools() {
       el("div", { class: "section-label" }, "我的工具"),
       renderToolboxSection({
         items: toolbox.items,
+        currentItemId: ui.highlight?.kind === "toolbox" ? ui.highlight.itemId : null,
         onOpen: (item) => openOrFocusTab(item.url),
         onEdit: (item) => openToolboxEdit(item),
         onDelete: (item) => removeToolboxItem(item),
@@ -1070,6 +1117,7 @@ async function renderTools() {
         renderTools();
       })
     );
+    scrollToCurrentPage();
     return;
   }
   const view = await renderTool(ui.toolId, {

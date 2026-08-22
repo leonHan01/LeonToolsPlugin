@@ -17,6 +17,12 @@ test("cardPayload uses interactive header template", () => {
   assert.equal(payload.card.body.elements[0].content, "写测试");
 });
 
+test("cardPayload falls back to default title and empty body", () => {
+  const payload = cardPayload("", "  ", "blue");
+  assert.equal(payload.card.header.title.content, "Leon Tools 通知");
+  assert.equal(payload.card.body.elements[0].content, "(无内容)");
+});
+
 test("signRequest is stable hmac for known input", async () => {
   const sign = await signRequest("demo", "1599360473");
   assert.equal(typeof sign, "string");
