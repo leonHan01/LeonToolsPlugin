@@ -1,5 +1,5 @@
 import * as api from "./api.js";
-import { PENDING_KEY, STORAGE_KEY, loadUi, queueDelete, saveUi } from "./settings.js";
+import { PENDING_KEY, STORAGE_KEY, STORAGE_MODE_BACKEND, getStorageMode, loadUi, queueDelete, saveUi } from "./settings.js";
 
 export { loadUi, saveUi };
 export { isRemoteId } from "./api.js";
@@ -152,7 +152,7 @@ export function fromRemoteCollection(remote, extras = {}) {
 }
 
 export async function createCollection(fields) {
-  if (await api.isBackendAvailable()) {
+  if (await api.shouldUseBackend()) {
     try {
       const remote = await api.createCollection({
         name: api.clip(fields.name, 200),
@@ -189,7 +189,7 @@ export async function updateCollection(collectionId, patch) {
     collection.dirty = true;
     return collection;
   });
-  if (api.isRemoteId(collectionId) && (await api.isBackendAvailable())) {
+  if (api.isRemoteId(collectionId) && (await api.shouldUseBackend())) {
     try {
       await api.updateCollection(collectionId, {
         name: api.clip(updated.name, 200),
@@ -212,7 +212,7 @@ export async function deleteCollection(collectionId) {
     state.collections = state.collections.filter((item) => !sameId(item.id, collectionId));
   });
   if (!api.isRemoteId(collectionId)) return;
-  if (await api.isBackendAvailable()) {
+  if (await api.shouldUseBackend()) {
     try {
       await api.deleteCollection(collectionId);
       await api.markAvailability(true);
@@ -221,12 +221,14 @@ export async function deleteCollection(collectionId) {
       await api.markAvailability(false, error instanceof Error ? error.message : "删除后端失败");
     }
   }
-  await queueDelete({ kind: "collection", collectionId: String(collectionId) });
+  if ((await getStorageMode()) === STORAGE_MODE_BACKEND) {
+    await queueDelete({ kind: "collection", collectionId: String(collectionId) });
+  }
 }
 
 export async function createGroup(collectionId, name) {
   const groupName = (name || "").trim() || "未命名分组";
-  if (api.isRemoteId(collectionId) && (await api.isBackendAvailable())) {
+  if (api.isRemoteId(collectionId) && (await api.shouldUseBackend())) {
     try {
       const remote = await api.createGroup(collectionId, { name: api.clip(groupName, 120) });
       const group = { id: String(remote.id), name: remote.name, items: [], dirty: false };
@@ -267,7 +269,7 @@ export async function renameGroup(collectionId, groupId, name) {
     collection.updatedAt = now();
     return current;
   });
-  if (api.isRemoteId(collectionId) && api.isRemoteId(groupId) && (await api.isBackendAvailable())) {
+  if (api.isRemoteId(collectionId) && api.isRemoteId(groupId) && (await api.shouldUseBackend())) {
     try {
       await api.updateGroup(collectionId, groupId, { name: api.clip(group.name, 120) });
       await withState((state) => {
@@ -291,7 +293,7 @@ export async function deleteGroup(collectionId, groupId) {
     collection.updatedAt = now();
   });
   if (!api.isRemoteId(collectionId) || !api.isRemoteId(groupId)) return;
-  if (await api.isBackendAvailable()) {
+  if (await api.shouldUseBackend()) {
     try {
       await api.deleteGroup(collectionId, groupId);
       await api.markAvailability(true);
@@ -300,7 +302,9 @@ export async function deleteGroup(collectionId, groupId) {
       await api.markAvailability(false, error instanceof Error ? error.message : "删除分组失败");
     }
   }
-  await queueDelete({ kind: "group", collectionId: String(collectionId), groupId: String(groupId) });
+  if ((await getStorageMode()) === STORAGE_MODE_BACKEND) {
+    await queueDelete({ kind: "group", collectionId: String(collectionId), groupId: String(groupId) });
+  }
 }
 
 export function buildPageItem({ title, url, favIconUrl = "", note = "" }) {
@@ -321,7 +325,7 @@ export async function addPageToCollection(collectionId, groupId, page) {
   const existing = findItemByUrl(snapshot, page.url, collectionId);
   if (existing) return { collection: existing.collection, group: existing.group, item: existing.item, duplicated: true };
 
-  if (api.isRemoteId(collectionId) && api.isRemoteId(groupId) && (await api.isBackendAvailable())) {
+  if (api.isRemoteId(collectionId) && api.isRemoteId(groupId) && (await api.shouldUseBackend())) {
     try {
       const remote = await api.createItem(collectionId, {
         groupId: Number(groupId),
@@ -381,7 +385,7 @@ export async function updateItem(collectionId, itemId, patch) {
   const latest = await loadState();
   const located = locateItem(latest, collectionId, itemId);
   const remoteGroupId = located?.group.id;
-  if (api.isRemoteId(collectionId) && api.isRemoteId(itemId) && api.isRemoteId(remoteGroupId) && (await api.isBackendAvailable())) {
+  if (api.isRemoteId(collectionId) && api.isRemoteId(itemId) && api.isRemoteId(remoteGroupId) && (await api.shouldUseBackend())) {
     try {
       await api.updateItem(collectionId, itemId, {
         groupId: Number(remoteGroupId),
@@ -409,7 +413,7 @@ export async function deleteItem(collectionId, itemId) {
     located.collection.updatedAt = now();
   });
   if (!api.isRemoteId(collectionId) || !api.isRemoteId(itemId)) return;
-  if (await api.isBackendAvailable()) {
+  if (await api.shouldUseBackend()) {
     try {
       await api.deleteItem(collectionId, itemId);
       await api.markAvailability(true);
@@ -418,7 +422,9 @@ export async function deleteItem(collectionId, itemId) {
       await api.markAvailability(false, error instanceof Error ? error.message : "删除网页失败");
     }
   }
-  await queueDelete({ kind: "item", collectionId: String(collectionId), itemId: String(itemId) });
+  if ((await getStorageMode()) === STORAGE_MODE_BACKEND) {
+    await queueDelete({ kind: "item", collectionId: String(collectionId), itemId: String(itemId) });
+  }
 }
 
 export function locateItem(state, collectionId, itemId) {
@@ -520,7 +526,7 @@ export async function reorderItems(collectionId, groupId, draggedId, targetId) {
 }
 
 async function persistRemoteOrder(send) {
-  if (!(await api.isBackendAvailable())) return;
+  if (!(await api.shouldUseBackend())) return;
   try {
     await send();
     await api.markAvailability(true);

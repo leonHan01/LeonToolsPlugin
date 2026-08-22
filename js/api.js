@@ -1,4 +1,4 @@
-import { getApiBase, saveSyncMeta } from "./settings.js";
+import { getApiBase, getStorageMode, STORAGE_MODE_BACKEND, saveSyncMeta } from "./settings.js";
 
 let availability = { at: 0, ok: false };
 
@@ -35,6 +35,11 @@ export async function isBackendAvailable(force = false) {
     availability = { at: Date.now(), ok: false };
   }
   return availability.ok;
+}
+
+export async function shouldUseBackend(force = false) {
+  if ((await getStorageMode()) !== STORAGE_MODE_BACKEND) return false;
+  return isBackendAvailable(force);
 }
 
 export function markAvailability(ok, error = "") {

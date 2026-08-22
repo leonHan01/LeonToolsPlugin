@@ -1,5 +1,12 @@
 import { el, icon, faviconImg, restoreFocus } from "./dom.js";
 import {
+  DEFAULT_API_BASE,
+  STORAGE_MODE_BACKEND,
+  STORAGE_MODE_BROWSER,
+  getApiBase,
+  getStorageMode,
+} from "./settings.js";
+import {
   addPageToCollection,
   clearPendingAdd,
   createCollection,
@@ -38,7 +45,6 @@ let state = { collections: [] };
 let currentTab = null;
 let applyingRemote = false;
 
-const currentPageEl = document.getElementById("current-page");
 const contentEl = document.getElementById("content");
 const sheetRoot = document.getElementById("sheet-root");
 const toastEl = document.getElementById("toast");
@@ -46,6 +52,12 @@ const toastEl = document.getElementById("toast");
 document.querySelectorAll(".tab").forEach((button) => {
   button.addEventListener("click", () => switchTab(button.dataset.tab));
 });
+
+const settingsBtn = document.getElementById("settings-btn");
+if (settingsBtn) {
+  settingsBtn.append(icon("gear"));
+  settingsBtn.addEventListener("click", () => openSettings());
+}
 
 init();
 
@@ -103,7 +115,6 @@ async function refreshActiveTabAndRender() {
     end: active?.selectionEnd,
   };
   await refreshActiveTab();
-  renderCurrentPage();
   restoreFocus(focus.id, focus.start, focus.end);
 }
 
@@ -146,8 +157,36 @@ function closeSheet() {
   sheetRoot.replaceChildren();
 }
 
-function openSheet(title, body, actions) {
-  const backdrop = el("div", { class: "sheet-backdrop", onClick: (event) => event.target === backdrop && closeSheet() });
+function confirmDelete(message) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      closeSheet();
+      resolve(value);
+    };
+    openSheet(
+      "确认删除",
+      el("p", {}, message),
+      [
+        el("button", { class: "btn ghost", type: "button", onClick: () => finish(false) }, "取消"),
+        el("button", { class: "btn danger", type: "button", onClick: () => finish(true) }, "确认删除"),
+      ],
+      () => finish(false)
+    );
+  });
+}
+
+function openSheet(title, body, actions, onClose) {
+  const backdrop = el("div", {
+    class: "sheet-backdrop",
+    onClick: (event) => {
+      if (event.target !== backdrop) return;
+      if (onClose) onClose();
+      else closeSheet();
+    },
+  });
   backdrop.append(
     el(
       "div",
@@ -160,8 +199,45 @@ function openSheet(title, body, actions) {
   sheetRoot.replaceChildren(backdrop);
 }
 
+async function openSettings() {
+  const mode = await getStorageMode();
+  const base = await getApiBase();
+  const backend = el("input", { type: "radio", name: "storage-mode", value: STORAGE_MODE_BACKEND, checked: mode === STORAGE_MODE_BACKEND });
+  const browser = el("input", { type: "radio", name: "storage-mode", value: STORAGE_MODE_BROWSER, checked: mode === STORAGE_MODE_BROWSER });
+  const apiInput = el("input", { class: "input", id: "api-base", value: base, placeholder: DEFAULT_API_BASE });
+  openSheet(
+    "设置",
+    el(
+      "div",
+      { class: "stack" },
+      el("div", { class: "field" }, el("label", {}, "数据保存位置")),
+      el("label", { class: "choice" }, backend, el("div", {}, el("strong", {}, "后端"), el("small", {}, "能连上 leon_workflow 时写入数据库；连不上则自动保存在浏览器。"))),
+      el("label", { class: "choice" }, browser, el("div", {}, el("strong", {}, "仅浏览器"), el("small", {}, "只保存在本机，不访问后端。"))),
+      el("div", { class: "field" }, el("label", {}, "后端地址"), apiInput)
+    ),
+    [
+      el("button", { class: "btn ghost", type: "button", onClick: closeSheet }, "取消"),
+      el(
+        "button",
+        {
+          class: "btn primary",
+          type: "button",
+          onClick: async () => {
+            const storageMode = backend.checked ? STORAGE_MODE_BACKEND : STORAGE_MODE_BROWSER;
+            const apiBase = apiInput.value.trim().replace(/\/$/, "") || DEFAULT_API_BASE;
+            await saveUi({ storageMode, apiBase });
+            closeSheet();
+            if (storageMode === STORAGE_MODE_BACKEND) await syncInBackground();
+            toast(storageMode === STORAGE_MODE_BACKEND ? "已改为保存到后端" : "已改为保存在浏览器");
+          },
+        },
+        "保存"
+      ),
+    ]
+  );
+}
+
 function render() {
-  renderCurrentPage();
   if (ui.tab === "tools") renderTools();
   else if (ui.collectionId) renderCollectionDetail();
   else renderCollectionList();
@@ -200,36 +276,19 @@ function currentSaved(collectionId = ui.collectionId) {
   return findItemByUrl(state, page.url, collectionId || undefined);
 }
 
-function renderCurrentPage() {
+function addCurrentPageButton(preferredCollectionId = ui.collectionId) {
   const page = pageFromTab();
-  if (!page) {
-    currentPageEl.replaceChildren(el("div", { class: "meta", style: { gridColumn: "1 / -1" } }, el("strong", {}, "没有可加入的标签页"), el("small", {}, "打开一个网页后再加入集合")));
-    return;
-  }
-  const savedHere = ui.collectionId ? currentSaved(ui.collectionId) : null;
-  const savedAnywhere = currentSaved(null);
-  const addLabel = ui.collectionId ? "加入此集合" : "加入集合";
-  const hint = savedHere ? page.url : savedAnywhere ? `${page.url} · 已收藏` : page.url;
-  currentPageEl.replaceChildren(
-    faviconImg(page.url, page.favIconUrl, "favicon lg"),
-    el(
-      "div",
-      { class: "meta" },
-      el("strong", { title: page.title }, page.title),
-      el("small", { title: page.url }, hint)
-    ),
-    savedHere
-      ? el("span", { class: "badge ok" }, icon("check"), "已收藏")
-      : el(
-          "button",
-          {
-            class: "btn success",
-            type: "button",
-            onClick: () => openAddSheet(page),
-          },
-          icon("plus"),
-          addLabel
-        )
+  const savedHere = preferredCollectionId ? currentSaved(preferredCollectionId) : null;
+  return el(
+    "button",
+    {
+      class: "btn success icon",
+      type: "button",
+      title: !page ? "没有可加入的标签页" : savedHere ? "当前页已在集合中" : preferredCollectionId ? "加入此集合" : "加入集合",
+      disabled: !page || Boolean(savedHere),
+      onClick: () => openAddSheet(page, preferredCollectionId || undefined),
+    },
+    icon("download")
   );
 }
 
@@ -293,6 +352,7 @@ function renderCollectionList() {
           restoreFocus("search-input", event.target.selectionStart, event.target.selectionEnd);
         },
       }),
+      addCurrentPageButton(null),
       el("button", { class: "btn primary icon", type: "button", title: "新建集合", onClick: () => openCollectionSheet() }, icon("plus"))
     ),
     list
@@ -393,56 +453,37 @@ function renderCollectionDetail() {
     return;
   }
   const keyword = ui.search.trim().toLowerCase();
-  const saved = currentSaved();
 
   contentEl.replaceChildren(
-    breadcrumb([
-      { label: "集合列表", onClick: goCollectionList },
-      { label: collection.name },
-    ]),
-    el(
-      "div",
-      { class: "detail-header" },
-      collection.description ? el("p", { class: "desc" }, collection.description) : null,
+    ...[
+      breadcrumb([
+        { label: "集合列表", onClick: goCollectionList },
+        { label: collection.name },
+      ]),
+      collection.description ? el("div", { class: "detail-header" }, el("p", { class: "desc" }, collection.description)) : null,
       el(
         "div",
-        { class: "row" },
-        el(
-          "button",
-          {
-            class: "btn success",
-            type: "button",
-            disabled: !pageFromTab() || Boolean(saved),
-            onClick: () => openAddSheet(pageFromTab(), collection.id),
+        { class: "toolbar" },
+        el("input", {
+          class: "input",
+          id: "search-input",
+          placeholder: "搜索网页标题或链接",
+          value: ui.search,
+          onInput: (event) => {
+            ui.search = event.target.value;
+            renderCollectionDetail();
+            restoreFocus("search-input", event.target.selectionStart, event.target.selectionEnd);
           },
-          icon("plus"),
-          saved ? "当前页已在集合中" : "加入当前页"
-        ),
-        el("button", { class: "btn", type: "button", onClick: () => openAll(collection) }, icon("external"), "全部打开"),
-        el("button", { class: "btn icon", type: "button", title: "编辑集合", onClick: () => openCollectionSheet(collection) }, icon("pencil"))
-      )
-    ),
-    el(
-      "div",
-      { class: "toolbar" },
-      el("input", {
-        class: "input",
-        id: "search-input",
-        placeholder: "搜索网页标题或链接",
-        value: ui.search,
-        onInput: (event) => {
-          ui.search = event.target.value;
-          renderCollectionDetail();
-          restoreFocus("search-input", event.target.selectionStart, event.target.selectionEnd);
-        },
-      }),
-      el("button", { class: "btn icon", type: "button", title: "新建分组", onClick: () => openGroupSheet(collection) }, icon("plus"))
-    ),
-    el(
-      "div",
-      { class: "group-list" },
-      collection.groups.map((group) => renderGroup(collection, group, keyword))
-    )
+        }),
+        addCurrentPageButton(collection.id),
+        el("button", { class: "btn icon", type: "button", title: "新建分组", onClick: () => openGroupSheet(collection) }, icon("plus"))
+      ),
+      el(
+        "div",
+        { class: "group-list" },
+        collection.groups.map((group) => renderGroup(collection, group, keyword))
+      ),
+    ].filter(Boolean)
   );
 }
 
@@ -529,21 +570,6 @@ async function openOrFocusTab(url, { active = true } = {}) {
   const result = await chrome.runtime.sendMessage({ type: "OPEN_OR_FOCUS", url, active });
   if (result?.error) throw new Error(result.error);
   return result;
-}
-
-async function openAll(collection) {
-  const items = collection.groups.flatMap((group) => group.items);
-  if (!items.length) {
-    toast("这个集合还没有网页");
-    return;
-  }
-  if (items.length > 12 && !window.confirm(`将打开最多 ${items.length} 个标签页，已打开的会直接跳转。确定继续？`)) return;
-  let created = 0;
-  for (let index = 0; index < items.length; index += 1) {
-    const result = await openOrFocusTab(items[index].url, { active: index === 0 });
-    if (result && result.reused === false) created += 1;
-  }
-  toast(created ? `已打开 ${created} 个网页` : "这些网页都已在标签页中");
 }
 
 function openCollectionSheet(collection = null, { addPage } = {}) {
@@ -777,100 +803,60 @@ function openItemSheet(collection, group, item) {
   );
 }
 
-function confirmDeleteCollection(collection) {
-  openSheet(
-    "删除集合",
-    el("p", {}, `确定删除网页集合「${collection.name}」吗？其中的网页也会一并删除。`),
-    [
-      el("button", { class: "btn ghost", type: "button", onClick: closeSheet }, "取消"),
-      el(
-        "button",
-        {
-          class: "btn danger",
-          type: "button",
-          onClick: async () => {
-            await deleteCollection(collection.id);
-            if (ui.collectionId === collection.id) ui.collectionId = null;
-            closeSheet();
-            toast("集合已删除");
-            await refreshState();
-            render();
-          },
-        },
-        "删除"
-      ),
-    ]
-  );
+async function confirmDeleteCollection(collection) {
+  const ok = await confirmDelete(`确定删除集合「${collection.name}」吗？其中的网页也会一并删除，此操作不可恢复。`);
+  if (!ok) return;
+  await deleteCollection(collection.id);
+  if (ui.collectionId === collection.id) ui.collectionId = null;
+  toast("集合已删除");
+  await refreshState();
+  render();
 }
 
-function confirmDeleteGroup(collection, group) {
-  openSheet(
-    "删除分组",
-    el("p", {}, `确定删除分组「${group.name}」及其中网页吗？`),
-    [
-      el("button", { class: "btn ghost", type: "button", onClick: closeSheet }, "取消"),
-      el(
-        "button",
-        {
-          class: "btn danger",
-          type: "button",
-          onClick: async () => {
-            try {
-              await deleteGroup(collection.id, group.id);
-              closeSheet();
-              await refreshState();
-              render();
-            } catch (error) {
-              toast(error instanceof Error ? error.message : "删除失败");
-            }
-          },
-        },
-        "删除"
-      ),
-    ]
-  );
+async function confirmDeleteGroup(collection, group) {
+  const ok = await confirmDelete(`确定删除分组「${group.name}」及其中网页吗？此操作不可恢复。`);
+  if (!ok) return;
+  try {
+    await deleteGroup(collection.id, group.id);
+    await refreshState();
+    render();
+  } catch (error) {
+    toast(error instanceof Error ? error.message : "删除失败");
+  }
 }
 
-function confirmDeleteItem(collection, item) {
-  openSheet(
-    "删除网页",
-    el("p", {}, `确定从集合中移除「${item.title}」吗？`),
-    [
-      el("button", { class: "btn ghost", type: "button", onClick: closeSheet }, "取消"),
-      el(
-        "button",
-        {
-          class: "btn danger",
-          type: "button",
-          onClick: async () => {
-            await deleteItem(collection.id, item.id);
-            closeSheet();
-            await refreshState();
-            render();
-          },
-        },
-        "删除"
-      ),
-    ]
-  );
+async function confirmDeleteItem(collection, item) {
+  const ok = await confirmDelete(`确定从集合中移除「${item.title}」吗？此操作不可恢复。`);
+  if (!ok) return;
+  await deleteItem(collection.id, item.id);
+  await refreshState();
+  render();
+}
+
+function toolsAddBar() {
+  return el("div", { class: "toolbar tools-toolbar" }, addCurrentPageButton(null));
 }
 
 async function renderTools() {
   if (!ui.toolId) {
-    contentEl.replaceChildren(renderToolsHome((id) => {
-      ui.toolId = id;
-      renderTools();
-    }));
+    contentEl.replaceChildren(
+      toolsAddBar(),
+      renderToolsHome((id) => {
+        ui.toolId = id;
+        renderTools();
+      })
+    );
     return;
   }
   const view = await renderTool(ui.toolId, {
     getActiveTab,
     toast,
+    confirmDelete,
     goHome: () => {
       ui.toolId = null;
       renderTools();
     },
     reload: () => renderTools(),
   });
-  contentEl.replaceChildren(view);
+  contentEl.replaceChildren(toolsAddBar(), view);
 }

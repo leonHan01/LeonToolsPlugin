@@ -51,22 +51,6 @@ button {
   min-height: 0;
 }
 
-.current-page {
-  display: grid;
-  grid-template-columns: 28px minmax(0, 1fr) auto;
-  gap: 8px;
-  align-items: center;
-  padding: 10px 12px;
-  background: var(--color-surface);
-  border-bottom: 1px solid var(--color-line);
-}
-
-.current-page .meta {
-  min-width: 0;
-}
-
-.current-page strong,
-.current-page small,
 .item-main strong,
 .item-main small,
 .collection-card p,
@@ -77,14 +61,12 @@ button {
   white-space: nowrap;
 }
 
-.current-page strong,
 .item-main strong,
 .collection-card strong {
   font-size: 13px;
   font-weight: 700;
 }
 
-.current-page small,
 .item-main small,
 .muted {
   color: var(--color-muted);
@@ -100,18 +82,38 @@ button {
   background: var(--color-bg-soft);
 }
 
-.favicon.lg {
-  width: 28px;
-  height: 28px;
-  border-radius: 6px;
-}
-
 .tabs {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 4px;
   padding: 8px 10px 0;
   background: var(--color-bg);
+}
+
+.app-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 6px 8px;
+  background: var(--color-surface);
+  border-top: 1px solid var(--color-line);
+}
+
+.tab-settings {
+  width: 34px;
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-muted);
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+}
+
+.tab-settings:hover {
+  color: var(--color-primary-strong);
+  background: var(--color-primary-soft);
 }
 
 .tab {
@@ -164,6 +166,10 @@ button {
   min-width: 0;
 }
 
+.tools-toolbar {
+  justify-content: flex-end;
+}
+
 .btn {
   min-height: 32px;
   padding: 0 10px;
@@ -198,8 +204,13 @@ button {
 
 .btn.success {
   color: #fff;
-  background: var(--color-info);
-  border-color: var(--color-info);
+  background: var(--color-success);
+  border-color: var(--color-success);
+}
+
+.btn.success:hover {
+  background: #047857;
+  border-color: #047857;
 }
 
 .btn.danger {
@@ -282,6 +293,37 @@ button {
   color: var(--color-muted);
   font-size: 11px;
   font-weight: 800;
+}
+
+.choice {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  padding: 10px;
+  color: inherit;
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.choice:has(input:checked) {
+  background: var(--color-primary-soft);
+  border-color: #93c5fd;
+}
+
+.choice strong,
+.choice small {
+  display: block;
+}
+
+.choice small {
+  margin-top: 4px;
+  color: var(--color-muted);
+  font-size: 11px;
+  font-weight: 500;
+  white-space: normal;
 }
 
 .badge {

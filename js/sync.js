@@ -1,5 +1,5 @@
 import * as api from "./api.js";
-import { loadSyncMeta, saveSyncMeta } from "./settings.js";
+import { STORAGE_MODE_BROWSER, getStorageMode, loadSyncMeta, saveSyncMeta } from "./settings.js";
 import {
   fromRemoteCollection,
   isRemoteId,
@@ -47,6 +47,9 @@ export function getLastIdMap() {
 export async function syncNow() {
   const idMap = {};
   lastIdMap = idMap;
+  if ((await getStorageMode()) === STORAGE_MODE_BROWSER) {
+    return { ok: true, connected: false, skipped: true, idMap };
+  }
   const online = await api.isBackendAvailable(true);
   if (!online) {
     await saveSyncMeta({ connected: false, error: "无法连接 Leon Workflow 后端" });

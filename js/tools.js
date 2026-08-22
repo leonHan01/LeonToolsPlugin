@@ -30,7 +30,7 @@ export function renderToolsHome(onOpen) {
   );
 }
 
-export async function renderTool(toolId, { getActiveTab, toast, goHome, reload }) {
+export async function renderTool(toolId, { getActiveTab, toast, goHome, reload, confirmDelete }) {
   const header = (title) =>
     el(
       "div",
@@ -41,7 +41,7 @@ export async function renderTool(toolId, { getActiveTab, toast, goHome, reload }
 
   if (toolId === "sync") return renderSyncTool(header, toast, reload);
   if (toolId === "page") return renderPageTool(header, getActiveTab, toast, reload);
-  if (toolId === "tabs") return renderTabsTool(header, toast, reload);
+  if (toolId === "tabs") return renderTabsTool(header, toast, reload, confirmDelete);
   if (toolId === "json") return renderJsonTool(header, toast);
   if (toolId === "url") return renderUrlTool(header, toast);
   if (toolId === "time") return renderTimeTool(header, toast);
@@ -140,7 +140,7 @@ async function renderPageTool(header, getActiveTab, toast, reload) {
   return box;
 }
 
-async function renderTabsTool(header, toast, reload) {
+async function renderTabsTool(header, toast, reload, confirmDelete) {
   const [active] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
   const windowId = active?.windowId ?? (await chrome.windows.getCurrent()).id;
   const tabs = await chrome.tabs.query({ windowId });
@@ -175,6 +175,10 @@ async function renderTabsTool(header, toast, reload) {
             ids.push(...sorted.slice(1).map((item) => item.id));
           }
           if (!ids.length) return;
+          const ok = confirmDelete
+            ? await confirmDelete(`将关闭 ${ids.length} 个重复标签页，确定继续吗？`)
+            : window.confirm(`将关闭 ${ids.length} 个重复标签页，确定继续吗？`);
+          if (!ok) return;
           await chrome.tabs.remove(ids);
           toast(`已关闭 ${ids.length} 个重复标签`);
           if (reload) reload();
@@ -428,7 +432,7 @@ function renderDataTool(header, toast, reload) {
     try {
       const count = await importJson(await picked.text());
       const result = await syncNow();
-      toast(result.ok ? `已导入 ${count} 个集合` : `已导入 ${count} 个集合，后端暂不可用`);
+      toast(result.skipped ? `已导入 ${count} 个集合` : result.ok ? `已导入 ${count} 个集合` : `已导入 ${count} 个集合，后端暂不可用`);
       if (reload) reload();
     } catch (error) {
       toast(error instanceof Error ? error.message : "导入失败");
