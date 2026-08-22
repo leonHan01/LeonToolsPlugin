@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Leon Tools Pro</title>
+    <link rel="stylesheet" href="css/sidepanel.css" />
+  </head>
+  <body>
+    <div class="app">
+      <section class="current-page" id="current-page"></section>
+      <nav class="tabs" role="tablist">
+        <button class="tab active" type="button" data-tab="collections" role="tab" aria-selected="true">集合</button>
+        <button class="tab" type="button" data-tab="tools" role="tab" aria-selected="false">工具</button>
+      </nav>
+      <main class="content" id="content"></main>
+    </div>
+    <div id="sheet-root"></div>
+    <div id="toast" class="toast" hidden></div>
+    <script type="module" src="js/sidepanel.js"></script>
+  </body>
+</html>
