@@ -13,7 +13,7 @@ function linesOf(items, emptyLabel) {
   return items.map((item, index) => `${index + 1}. ${item}`).join("\n");
 }
 
-function snapshotPrompt(notes, todos) {
+export function snapshotPrompt(notes, todos) {
   const openTodos = todos.filter((item) => !item.done);
   const doneTodos = todos.filter((item) => item.done);
   return [
@@ -30,7 +30,7 @@ function snapshotPrompt(notes, todos) {
   ].join("\n");
 }
 
-function ensureTldr(content) {
+export function ensureTldr(content) {
   const text = String(content || "").trim();
   if (/^TL;\s*DR[:：]/i.test(text)) {
     return text.replace(/^TL;\s*DR[:：]\s*/i, "TL;DR：");

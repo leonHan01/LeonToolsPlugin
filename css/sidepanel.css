@@ -421,7 +421,7 @@ button {
 
 .collection-card .head {
   display: grid;
-  grid-template-columns: 18px 10px minmax(0, 1fr);
+  grid-template-columns: 18px 20px minmax(0, 1fr);
   gap: 8px;
   align-items: start;
 }
@@ -429,9 +429,25 @@ button {
 .dot {
   width: 10px;
   height: 10px;
-  margin-top: 4px;
+  margin-top: 5px;
   border-radius: 50%;
   background: var(--color-primary);
+}
+
+.collection-icon {
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  margin-top: 1px;
+  color: var(--color-primary);
+  background: var(--color-primary-soft);
+  border-radius: 5px;
+}
+
+.collection-icon .icon-svg {
+  width: 13px;
+  height: 13px;
 }
 
 .collection-card p {
@@ -496,6 +512,9 @@ button {
 
 .crumb-link {
   flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   padding: 0;
   color: var(--color-primary);
   background: none;
@@ -514,8 +533,22 @@ button {
   font-weight: 500;
 }
 
+.crumb-current .icon-svg,
+.crumb-link .icon-svg {
+  width: 13px;
+  height: 13px;
+  flex: none;
+}
+
+.icon-pick .dot {
+  margin-top: 0;
+}
+
 .crumb-current {
   min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   overflow: hidden;
   color: var(--color-text);
   text-overflow: ellipsis;

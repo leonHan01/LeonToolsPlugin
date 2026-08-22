@@ -1,6 +1,7 @@
 import * as api from "./api.js";
 import { el, icon } from "./dom.js";
 import { notifyTodoCompleted, notifyTodoCreated } from "./feishu.js";
+import { mergeDirtyWithRemote, withBackend } from "./persist.js";
 import { TODOS_KEY } from "./settings.js";
 import { uid } from "./storage.js";
 import { renderAnalysisBar } from "./work-analysis.js";
@@ -39,20 +40,13 @@ function sortTodos(todos) {
 export async function refreshTodosFromBackend() {
   const local = await loadTodos();
   if (!(await api.shouldUseBackend(true))) return local;
-  try {
+  const next = await withBackend("加载待办失败", async () => {
     const remote = (await api.listTodos() || []).map(fromRemote);
-    const kept = local.todos.filter((item) => !api.isRemoteId(item.id) || item.dirty);
-    const keptRemoteIds = new Set(kept.filter((item) => api.isRemoteId(item.id)).map((item) => String(item.id)));
-    const next = {
-      todos: sortTodos([...kept, ...remote.filter((item) => !keptRemoteIds.has(String(item.id)))]),
-    };
-    await saveTodos(next);
-    await api.markAvailability(true);
-    return next;
-  } catch (error) {
-    await api.markAvailability(false, error instanceof Error ? error.message : "加载待办失败");
-    return local;
-  }
+    const merged = { todos: sortTodos(mergeDirtyWithRemote(local.todos, remote)) };
+    await saveTodos(merged);
+    return merged;
+  });
+  return next || local;
 }
 
 export async function createTodo(content) {
@@ -72,20 +66,16 @@ export async function createTodo(content) {
   state.todos = sortTodos(state.todos);
   await saveTodos(state);
   notifyTodoCreated(text);
-  if (await api.shouldUseBackend()) {
-    try {
-      const remote = fromRemote(await api.createTodo({ content: text, done: item.done, sortOrder: item.sortOrder }));
-      const index = state.todos.findIndex((todo) => todo.id === item.id);
-      if (index >= 0) state.todos[index] = remote;
-      state.todos = sortTodos(state.todos);
-      await saveTodos(state);
-      await api.markAvailability(true);
-      return remote;
-    } catch (error) {
-      await api.markAvailability(false, error instanceof Error ? error.message : "保存待办失败");
-    }
-  }
-  return item;
+  if (!(await api.shouldUseBackend())) return item;
+  const remote = await withBackend("保存待办失败", async () =>
+    fromRemote(await api.createTodo({ content: text, done: item.done, sortOrder: item.sortOrder }))
+  );
+  if (!remote) return item;
+  const index = state.todos.findIndex((todo) => todo.id === item.id);
+  if (index >= 0) state.todos[index] = remote;
+  state.todos = sortTodos(state.todos);
+  await saveTodos(state);
+  return remote;
 }
 
 export async function updateTodo(todoId, patch) {
@@ -105,13 +95,10 @@ export async function updateTodo(todoId, patch) {
   await saveTodos(state);
   if (!wasDone && item.done) notifyTodoCompleted(item.content);
   if (api.isRemoteId(todoId) && (await api.shouldUseBackend())) {
-    try {
-      await api.updateTodo(todoId, { content: item.content, done: item.done });
+    const ok = await withBackend("更新待办失败", () => api.updateTodo(todoId, { content: item.content, done: item.done }));
+    if (ok !== undefined) {
       item.dirty = false;
       await saveTodos(state);
-      await api.markAvailability(true);
-    } catch (error) {
-      await api.markAvailability(false, error instanceof Error ? error.message : "更新待办失败");
     }
   }
   return item;
@@ -122,12 +109,7 @@ export async function deleteTodo(todoId) {
   state.todos = state.todos.filter((item) => String(item.id) !== String(todoId));
   await saveTodos(state);
   if (api.isRemoteId(todoId) && (await api.shouldUseBackend())) {
-    try {
-      await api.deleteTodo(todoId);
-      await api.markAvailability(true);
-    } catch (error) {
-      await api.markAvailability(false, error instanceof Error ? error.message : "删除待办失败");
-    }
+    await withBackend("删除待办失败", () => api.deleteTodo(todoId));
   }
 }
 
@@ -156,7 +138,7 @@ export function renderTodosPage({ toast, confirmDelete, openSheet, closeSheet })
   const page = el("div", { class: "todos-page" });
   const list = el("div", { class: "todo-list" });
   const input = el("input", { class: "input", placeholder: "添加待办，回车保存", id: "todo-input" });
-  const addBtn = el("button", { class: "btn primary icon", type: "button", title: "添加" }, icon("plus"));
+  const addBtn = el("button", { class: "btn primary icon", type: "button", title: "发送" }, icon("send"));
 
   async function reload() {
     const state = await refreshTodosFromBackend();

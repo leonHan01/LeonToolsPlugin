@@ -1,5 +1,6 @@
 import * as api from "./api.js";
 import { el, icon, faviconImg, hasIcon } from "./dom.js";
+import { mergeDirtyWithRemote, withBackend } from "./persist.js";
 import { TOOLBOX_KEY } from "./settings.js";
 import { hostnameOf, normalizeUrl, uid } from "./storage.js";
 
@@ -33,20 +34,15 @@ function fromRemote(item) {
 }
 
 export async function refreshToolboxFromBackend() {
-  if (!(await api.shouldUseBackend(true))) return loadToolbox();
-  try {
-    const remote = await api.listToolbox();
-    const items = (remote || []).map(fromRemote);
-    const local = await loadToolbox();
-    const leftover = local.items.filter((item) => !api.isRemoteId(item.id));
-    const next = { items: [...leftover, ...items] };
-    await saveToolbox(next);
-    await api.markAvailability(true);
-    return next;
-  } catch (error) {
-    await api.markAvailability(false, error instanceof Error ? error.message : "加载工具箱失败");
-    return loadToolbox();
-  }
+  const local = await loadToolbox();
+  if (!(await api.shouldUseBackend(true))) return local;
+  const next = await withBackend("加载工具箱失败", async () => {
+    const remote = (await api.listToolbox() || []).map(fromRemote);
+    const merged = { items: mergeDirtyWithRemote(local.items, remote) };
+    await saveToolbox(merged);
+    return merged;
+  });
+  return next || local;
 }
 
 export function findToolboxItemByUrl(items, url) {
@@ -68,15 +64,11 @@ export async function addToToolbox(page) {
   };
 
   if (await api.shouldUseBackend()) {
-    try {
-      const remote = await api.createToolboxItem(payload);
-      const item = fromRemote(remote);
+    const item = await withBackend("加入工具箱失败", async () => fromRemote(await api.createToolboxItem(payload)));
+    if (item) {
       if (!state.items.some((entry) => String(entry.id) === item.id)) state.items.unshift(item);
       await saveToolbox(state);
-      await api.markAvailability(true);
       return { item, duplicated: false };
-    } catch (error) {
-      await api.markAvailability(false, error instanceof Error ? error.message : "加入工具箱失败");
     }
   }
 
@@ -107,18 +99,11 @@ export async function updateToolboxItem(itemId, patch) {
   item.dirty = true;
   await saveToolbox(state);
   if (api.isRemoteId(itemId) && (await api.shouldUseBackend())) {
-    try {
-      await api.updateToolboxItem(itemId, {
-        name: item.title,
-        url: item.url,
-        favIconUrl: item.favIconUrl || "",
-        icon: item.icon || "",
-      });
+    const payload = { name: item.title, url: item.url, favIconUrl: item.favIconUrl || "", icon: item.icon || "" };
+    const ok = await withBackend("更新工具失败", () => api.updateToolboxItem(itemId, payload));
+    if (ok !== undefined) {
       item.dirty = false;
       await saveToolbox(state);
-      await api.markAvailability(true);
-    } catch (error) {
-      await api.markAvailability(false, error instanceof Error ? error.message : "更新工具失败");
     }
   }
   return item;
@@ -129,12 +114,7 @@ export async function deleteToolboxItem(itemId) {
   state.items = state.items.filter((item) => String(item.id) !== String(itemId));
   await saveToolbox(state);
   if (api.isRemoteId(itemId) && (await api.shouldUseBackend())) {
-    try {
-      await api.deleteToolboxItem(itemId);
-      await api.markAvailability(true);
-    } catch (error) {
-      await api.markAvailability(false, error instanceof Error ? error.message : "删除工具失败");
-    }
+    await withBackend("删除工具失败", () => api.deleteToolboxItem(itemId));
   }
 }
 

@@ -1,5 +1,6 @@
 import * as api from "./api.js";
 import { el, icon } from "./dom.js";
+import { withBackend } from "./persist.js";
 import { CHAT_KEY, getDeepseekKey } from "./settings.js";
 import { formatDateTime, uid } from "./storage.js";
 
@@ -63,7 +64,7 @@ function normalizeSession(session) {
   };
 }
 
-function migrateStore(stored) {
+export function migrateStore(stored) {
   if (!stored || typeof stored !== "object") return emptyStore();
   if (Array.isArray(stored.sessions)) {
     const sessions = stored.sessions.map(normalizeSession);
@@ -179,7 +180,7 @@ function mergeSession(localSession, remoteSession) {
 export async function refreshSessionsFromBackend() {
   const local = await loadChat();
   if (!(await api.shouldUseBackend(true))) return local;
-  try {
+  const store = await withBackend("加载对话失败", async () => {
     const remoteList = await api.listChatSessionsFull();
     const leftover = local.sessions.filter((item) => !api.isRemoteId(item.id));
     const leftoverIds = new Set(leftover.map((item) => String(item.id)));
@@ -189,23 +190,20 @@ export async function refreshSessionsFromBackend() {
         .filter((item) => !leftoverIds.has(String(item.id)))
         .map((item) => mergeSession(findSession(local, item.id), item)),
     ];
-    const store = { currentSessionId: local.currentSessionId, sessions };
-    if (!findSession(store, store.currentSessionId)) {
-      store.currentSessionId = sortedSessions(store)[0]?.id || null;
+    const next = { currentSessionId: local.currentSessionId, sessions };
+    if (!findSession(next, next.currentSessionId)) {
+      next.currentSessionId = sortedSessions(next)[0]?.id || null;
     }
-    await saveChat(store);
-    await api.markAvailability(true);
-    return store;
-  } catch (error) {
-    await api.markAvailability(false, error instanceof Error ? error.message : "加载对话失败");
-    return local;
-  }
+    await saveChat(next);
+    return next;
+  });
+  return store || local;
 }
 
 export async function pushLocalSessions() {
   if (!(await api.shouldUseBackend(true))) return;
   const store = await loadChat();
-  try {
+  await withBackend("同步对话失败", async () => {
     for (const session of [...store.sessions]) {
       const current = findSession(store, session.id) || session;
       if (!current.messages.length && !api.isRemoteId(current.id)) continue;
@@ -213,10 +211,8 @@ export async function pushLocalSessions() {
       await pushSessionMessages(remoteSession);
     }
     await saveChat(store);
-    await api.markAvailability(true);
-  } catch (error) {
-    await api.markAvailability(false, error instanceof Error ? error.message : "同步对话失败");
-  }
+    return true;
+  });
 }
 
 export async function createSession(title = "新对话") {

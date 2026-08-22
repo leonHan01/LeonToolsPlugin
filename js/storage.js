@@ -22,12 +22,13 @@ export function emptyGroup(name = "默认分组") {
   return { id: uid(), name, items: [], dirty: true, sortOrder: 0 };
 }
 
-export function emptyCollection({ name, description = "", color } = {}) {
+export function emptyCollection({ name, description = "", color, icon = "" } = {}) {
   const ts = now();
   return {
     id: uid(),
     name: name.trim(),
     description: (description || "").trim(),
+    icon: icon || "",
     color: color || COLORS[Math.floor(Math.random() * COLORS.length)],
     createdAt: ts,
     updatedAt: ts,
@@ -134,6 +135,7 @@ export function fromRemoteCollection(remote, extras = {}) {
     id: String(remote.id),
     name: remote.name,
     description: remote.description || "",
+    icon: remote.icon || extras.icon || "",
     color: extras.color || colors[String(remote.id)] || colors[remote.name] || colorFromId(remote.id),
     createdAt: api.parseTime(remote.createTime),
     updatedAt: api.parseTime(remote.updateTime),
@@ -157,8 +159,9 @@ export async function createCollection(fields) {
       const remote = await api.createCollection({
         name: api.clip(fields.name, 200),
         description: fields.description || "",
+        icon: fields.icon || "",
       });
-      const collection = fromRemoteCollection(remote, { color: fields.color });
+      const collection = fromRemoteCollection(remote, { color: fields.color, icon: fields.icon || "" });
       await withState((state) => {
         state.collections.unshift(collection);
         reindex(state.collections);
@@ -184,6 +187,7 @@ export async function updateCollection(collectionId, patch) {
     if (!collection) throw new Error("集合不存在");
     if (patch.name != null) collection.name = patch.name.trim();
     if (patch.description != null) collection.description = patch.description.trim();
+    if (patch.icon != null) collection.icon = String(patch.icon || "").trim();
     if (patch.color) collection.color = patch.color;
     collection.updatedAt = now();
     collection.dirty = true;
@@ -194,6 +198,7 @@ export async function updateCollection(collectionId, patch) {
       await api.updateCollection(collectionId, {
         name: api.clip(updated.name, 200),
         description: updated.description || "",
+        icon: updated.icon || "",
       });
       await withState((state) => {
         const collection = findCollection(state, collectionId);

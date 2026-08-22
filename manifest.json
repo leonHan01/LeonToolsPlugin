@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Leon Tools Pro",
   "description": "Chrome 侧边栏：网页集合与常用工具。把当前标签页归入集合，按项目整理资料。",
-  "version": "1.5.1",
+  "version": "1.5.2",
   "minimum_chrome_version": "116",
   "icons": {
     "16": "icons/icon16.png",

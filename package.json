@@ -1,0 +1,9 @@
+{
+  "name": "leon-tools-pro",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "test:coverage": "node --experimental-test-coverage --test test/*.test.js"
+  }
+}

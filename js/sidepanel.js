@@ -1,4 +1,5 @@
 import { el, icon, faviconImg, restoreFocus, TOOL_ICONS, hasIcon } from "./dom.js";
+import { createIconPicker } from "./icon-picker.js";
 import {
   DEFAULT_API_BASE,
   STORAGE_MODE_BACKEND,
@@ -383,10 +384,11 @@ function breadcrumb(items) {
   const nodes = [];
   items.forEach((item, index) => {
     if (index > 0) nodes.push(el("span", { class: "crumb-sep", "aria-hidden": "true" }, "/"));
+    const mark = item.icon && hasIcon(item.icon) ? icon(item.icon) : null;
     if (item.onClick) {
-      nodes.push(el("button", { class: "crumb-link", type: "button", onClick: item.onClick }, item.label));
+      nodes.push(el("button", { class: "crumb-link", type: "button", onClick: item.onClick }, mark, item.label));
     } else {
-      nodes.push(el("span", { class: "crumb-current", title: item.label }, item.label));
+      nodes.push(el("span", { class: "crumb-current", title: item.label }, mark, item.label));
     }
   });
   return el("nav", { class: "breadcrumb", "aria-label": "面包屑" }, nodes);
@@ -488,7 +490,7 @@ function collectionCard(collection) {
       "div",
       { class: "head" },
       canDrag ? dragHandle({ type: "collection", id: collection.id }) : el("span", { class: "drag-handle" }),
-      el("span", { class: "dot", style: { background: collection.color } }),
+      collectionMark(collection),
       el(
         "button",
         {
@@ -538,7 +540,7 @@ function renderCollectionDetail() {
     ...[
       breadcrumb([
         { label: "集合列表", onClick: goCollectionList },
-        { label: collection.name },
+        { label: collection.name, icon: collection.icon },
       ]),
       collection.description ? el("div", { class: "detail-header" }, el("p", { class: "desc" }, collection.description)) : null,
       el(
@@ -622,10 +624,10 @@ function itemRow(collection, group, item, canDrag) {
         class: "item-main",
         type: "button",
         style: { background: "transparent", border: "0", padding: "0", textAlign: "left", color: "inherit", minWidth: "0" },
+        title: item.title,
         onClick: () => openOrFocusTab(item.url),
       },
-      el("strong", { title: item.title }, item.title),
-      el("small", { title: item.url }, item.url),
+      el("strong", {}, item.title),
       item.note ? el("div", { class: "note-chip" }, item.note) : null
     ),
     el(
@@ -652,12 +654,36 @@ async function openOrFocusTab(url, { active = true } = {}) {
   return result;
 }
 
+function collectionMark(collection) {
+  if (hasIcon(collection?.icon)) {
+    const wrap = el("span", { class: "collection-icon", style: { color: collection.color } });
+    wrap.append(icon(collection.icon));
+    return wrap;
+  }
+  return el("span", { class: "dot", style: { background: collection?.color } });
+}
+
+function collectionIconPicker(initial) {
+  return createIconPicker({
+    choices: [{ id: "", label: "默认圆点" }, ...TOOL_ICONS.filter((item) => item.id !== "favicon")],
+    initial: hasIcon(initial) ? initial : "",
+    markFor: (entry) => (entry.id ? icon(entry.id) : el("span", { class: "dot" })),
+  });
+}
+
 function openCollectionSheet(collection = null, { addPage } = {}) {
   const name = el("input", { class: "input", id: "collection-name", value: collection?.name || "", placeholder: "例如：A 项目调研资料" });
   const description = el("textarea", { class: "textarea", id: "collection-desc", placeholder: "记录这个集合的用途", text: collection?.description || "" });
+  const picker = collectionIconPicker(collection?.icon);
   openSheet(
     collection ? "编辑网页集合" : "新建网页集合",
-    el("div", { class: "stack" }, el("div", { class: "field" }, el("label", {}, "集合名称"), name), el("div", { class: "field" }, el("label", {}, "描述"), description)),
+    el(
+      "div",
+      { class: "stack" },
+      el("div", { class: "field" }, el("label", {}, "集合名称"), name),
+      el("div", { class: "field" }, el("label", {}, "描述"), description),
+      el("div", { class: "field" }, el("label", {}, "图标"), picker.node)
+    ),
     [
       el("button", { class: "btn ghost", type: "button", onClick: closeSheet }, "取消"),
       el(
@@ -671,10 +697,10 @@ function openCollectionSheet(collection = null, { addPage } = {}) {
               return;
             }
             if (collection) {
-              await updateCollection(collection.id, { name: name.value, description: description.value });
+              await updateCollection(collection.id, { name: name.value, description: description.value, icon: picker.value() });
               toast("集合已更新");
             } else {
-              const created = await createCollection({ name: name.value, description: description.value });
+              const created = await createCollection({ name: name.value, description: description.value, icon: picker.value() });
               ui.collectionId = created.id;
               saveUi({ lastCollectionId: created.id, lastTab: ui.tab });
               if (addPage?.url) {
@@ -734,6 +760,7 @@ function openAddSheet(page, preferredCollectionId = ui.collectionId) {
   }
   if (!state.collections.length) {
     const name = el("input", { class: "input", id: "collection-name", value: hostnameOf(page.url) || "新集合", placeholder: "集合名称" });
+    const picker = collectionIconPicker("");
     openSheet(
       "先创建一个集合",
       el(
@@ -741,7 +768,8 @@ function openAddSheet(page, preferredCollectionId = ui.collectionId) {
         { class: "stack" },
         pagePreview(page),
         el("p", { class: "muted" }, "还没有集合。创建后会把当前网页加进去。"),
-        el("div", { class: "field" }, el("label", {}, "集合名称"), name)
+        el("div", { class: "field" }, el("label", {}, "集合名称"), name),
+        el("div", { class: "field" }, el("label", {}, "图标"), picker.node)
       ),
       [
         el("button", { class: "btn ghost", type: "button", onClick: closeSheet }, "取消"),
@@ -752,7 +780,7 @@ function openAddSheet(page, preferredCollectionId = ui.collectionId) {
             type: "button",
             onClick: async () => {
               if (!name.value.trim()) return name.focus();
-              const created = await createCollection({ name: name.value, description: "" });
+              const created = await createCollection({ name: name.value, description: "", icon: picker.value() });
               await addPageToCollection(created.id, created.groups[0].id, page);
               ui.collectionId = created.id;
               saveUi({ lastCollectionId: created.id, lastTab: ui.tab });
@@ -916,34 +944,16 @@ async function confirmDeleteItem(collection, item) {
 function openToolboxEdit(item) {
   const title = el("input", { class: "input", value: item.title });
   const url = el("input", { class: "input", value: item.url });
-  let selectedIcon = hasIcon(item.icon) ? item.icon : "favicon";
-  const grid = el("div", { class: "icon-picker" });
-
-  function renderPicker() {
-    grid.replaceChildren(
-      ...TOOL_ICONS.map((entry) => {
-        const active = selectedIcon === entry.id;
-        const mark =
-          entry.id === "favicon"
-            ? faviconImg(url.value.trim() || item.url, item.favIconUrl, "favicon")
-            : icon(entry.id);
-        const btn = el(
-          "button",
-          { class: `icon-pick${active ? " active" : ""}`, type: "button", title: entry.label },
-          mark
-        );
-        btn.addEventListener("click", () => {
-          selectedIcon = entry.id;
-          renderPicker();
-        });
-        return btn;
-      })
-    );
-  }
-
-  renderPicker();
+  const picker = createIconPicker({
+    choices: TOOL_ICONS,
+    initial: hasIcon(item.icon) ? item.icon : "favicon",
+    markFor: (entry) =>
+      entry.id === "favicon"
+        ? faviconImg(url.value.trim() || item.url, item.favIconUrl, "favicon")
+        : icon(entry.id),
+  });
   url.addEventListener("change", () => {
-    if (selectedIcon === "favicon") renderPicker();
+    if (picker.value() === "favicon") picker.redraw();
   });
 
   openSheet(
@@ -953,7 +963,7 @@ function openToolboxEdit(item) {
       { class: "stack" },
       el("div", { class: "field" }, el("label", {}, "名称"), title),
       el("div", { class: "field" }, el("label", {}, "网址"), url),
-      el("div", { class: "field" }, el("label", {}, "图标"), grid)
+      el("div", { class: "field" }, el("label", {}, "图标"), picker.node)
     ),
     [
       el("button", { class: "btn ghost", type: "button", onClick: closeSheet }, "取消"),
@@ -967,7 +977,7 @@ function openToolboxEdit(item) {
             await updateToolboxItem(item.id, {
               title: title.value,
               url: url.value,
-              icon: selectedIcon === "favicon" ? "" : selectedIcon,
+              icon: picker.value() === "favicon" ? "" : picker.value(),
             });
             closeSheet();
             await renderTools();

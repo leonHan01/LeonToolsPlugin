@@ -128,6 +128,7 @@ async function pushDirty(idMap) {
         await api.updateCollection(collection.id, {
           name: api.clip(collection.name, 200),
           description: collection.description || "",
+          icon: collection.icon || "",
         });
       }
       for (const group of collection.groups || []) {
@@ -171,6 +172,7 @@ async function pushNewCollection(collection, idMap) {
   const remote = await api.createCollection({
     name: api.clip(collection.name, 200),
     description: collection.description || "",
+    icon: collection.icon || "",
   });
   idMap[collection.id] = String(remote.id);
   const defaultGroup = (remote.groups || [])[0];

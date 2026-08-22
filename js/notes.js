@@ -1,6 +1,7 @@
 import * as api from "./api.js";
 import { el, icon } from "./dom.js";
 import { notifyNoteCreated } from "./feishu.js";
+import { mergeDirtyWithRemote, withBackend } from "./persist.js";
 import { NOTES_KEY } from "./settings.js";
 import { formatDateTime, uid } from "./storage.js";
 import { renderAnalysisBar } from "./work-analysis.js";
@@ -37,20 +38,13 @@ function sortNotes(notes) {
 export async function refreshNotesFromBackend() {
   const local = await loadNotes();
   if (!(await api.shouldUseBackend(true))) return local;
-  try {
+  const next = await withBackend("加载便签失败", async () => {
     const remote = (await api.listNotes() || []).map(fromRemote);
-    const kept = local.notes.filter((note) => !api.isRemoteId(note.id) || note.dirty);
-    const keptRemoteIds = new Set(kept.filter((note) => api.isRemoteId(note.id)).map((note) => String(note.id)));
-    const next = {
-      notes: sortNotes([...kept, ...remote.filter((note) => !keptRemoteIds.has(String(note.id)))]),
-    };
-    await saveNotes(next);
-    await api.markAvailability(true);
-    return next;
-  } catch (error) {
-    await api.markAvailability(false, error instanceof Error ? error.message : "加载便签失败");
-    return local;
-  }
+    const merged = { notes: sortNotes(mergeDirtyWithRemote(local.notes, remote)) };
+    await saveNotes(merged);
+    return merged;
+  });
+  return next || local;
 }
 
 export async function createNote(content) {
@@ -67,19 +61,13 @@ export async function createNote(content) {
   state.notes.push(note);
   await saveNotes(state);
   notifyNoteCreated(text);
-  if (await api.shouldUseBackend()) {
-    try {
-      const remote = fromRemote(await api.createNote({ content: text }));
-      const index = state.notes.findIndex((item) => item.id === note.id);
-      if (index >= 0) state.notes[index] = remote;
-      await saveNotes(state);
-      await api.markAvailability(true);
-      return remote;
-    } catch (error) {
-      await api.markAvailability(false, error instanceof Error ? error.message : "保存便签失败");
-    }
-  }
-  return note;
+  if (!(await api.shouldUseBackend())) return note;
+  const remote = await withBackend("保存便签失败", async () => fromRemote(await api.createNote({ content: text })));
+  if (!remote) return note;
+  const index = state.notes.findIndex((item) => item.id === note.id);
+  if (index >= 0) state.notes[index] = remote;
+  await saveNotes(state);
+  return remote;
 }
 
 export async function updateNote(noteId, content) {
@@ -93,13 +81,10 @@ export async function updateNote(noteId, content) {
   note.dirty = true;
   await saveNotes(state);
   if (api.isRemoteId(noteId) && (await api.shouldUseBackend())) {
-    try {
-      await api.updateNote(noteId, { content: text });
+    const ok = await withBackend("更新便签失败", () => api.updateNote(noteId, { content: text }));
+    if (ok !== undefined) {
       note.dirty = false;
       await saveNotes(state);
-      await api.markAvailability(true);
-    } catch (error) {
-      await api.markAvailability(false, error instanceof Error ? error.message : "更新便签失败");
     }
   }
   return note;
@@ -110,12 +95,7 @@ export async function deleteNote(noteId) {
   state.notes = state.notes.filter((item) => String(item.id) !== String(noteId));
   await saveNotes(state);
   if (api.isRemoteId(noteId) && (await api.shouldUseBackend())) {
-    try {
-      await api.deleteNote(noteId);
-      await api.markAvailability(true);
-    } catch (error) {
-      await api.markAvailability(false, error instanceof Error ? error.message : "删除便签失败");
-    }
+    await withBackend("删除便签失败", () => api.deleteNote(noteId));
   }
 }
 

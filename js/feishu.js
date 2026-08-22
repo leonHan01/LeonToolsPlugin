@@ -1,11 +1,11 @@
 import { getFeishuSettings } from "./settings.js";
 
-function clipText(text, max = 2000) {
+export function clipText(text, max = 2000) {
   const value = String(text || "").trim();
   return value.length <= max ? value : `${value.slice(0, max)}…`;
 }
 
-async function signRequest(secret, timestamp) {
+export async function signRequest(secret, timestamp) {
   const keyBytes = new TextEncoder().encode(`${timestamp}\n${secret}`);
   const key = await crypto.subtle.importKey("raw", keyBytes, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
   const signature = await crypto.subtle.sign("HMAC", key, new Uint8Array());
@@ -15,7 +15,7 @@ async function signRequest(secret, timestamp) {
   return btoa(binary);
 }
 
-function cardPayload(title, text, template = "blue") {
+export function cardPayload(title, text, template = "blue") {
   return {
     msg_type: "interactive",
     card: {

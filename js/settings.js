@@ -42,64 +42,51 @@ export async function getStorageMode() {
 }
 
 export const DEEPSEEK_SETTING_KEY = "DEEPSEEK_API_KEY";
+export const FEISHU_WEBHOOK_SETTING_KEY = "FEISHU_WEBHOOK_URL";
+export const FEISHU_SECRET_SETTING_KEY = "FEISHU_WEBHOOK_SECRET";
 
-export async function getDeepseekKey() {
+async function getCachedSetting(localKey, remoteKey, { keepLocalIfRemoteEmpty = false } = {}) {
   try {
     const remote = await import("./api.js");
     if (await remote.isBackendAvailable()) {
-      const data = await remote.getAppSetting(DEEPSEEK_SETTING_KEY);
+      const data = await remote.getAppSetting(remoteKey);
       const value = String(data?.value || "").trim();
-      if (value) {
-        await chrome.storage.local.set({ [DEEPSEEK_KEY]: value });
+      if (value || !keepLocalIfRemoteEmpty) {
+        await chrome.storage.local.set({ [localKey]: value });
         return value;
       }
     }
   } catch {
-    /* fall back to the local cache */
+    /* use the local cache */
   }
-  const data = await chrome.storage.local.get(DEEPSEEK_KEY);
-  return String(data[DEEPSEEK_KEY] || "").trim();
+  const data = await chrome.storage.local.get(localKey);
+  return String(data[localKey] || "").trim();
+}
+
+async function saveCachedSetting(localKey, remoteKey, value, offlineMessage) {
+  const next = String(value || "").trim();
+  await chrome.storage.local.set({ [localKey]: next });
+  const remote = await import("./api.js");
+  if (!(await remote.isBackendAvailable(true))) {
+    throw new Error(offlineMessage);
+  }
+  await remote.saveAppSetting(remoteKey, next);
+}
+
+export async function getDeepseekKey() {
+  return getCachedSetting(DEEPSEEK_KEY, DEEPSEEK_SETTING_KEY, { keepLocalIfRemoteEmpty: true });
 }
 
 export async function saveDeepseekKey(key) {
-  const value = String(key || "").trim();
-  await chrome.storage.local.set({ [DEEPSEEK_KEY]: value });
-  const remote = await import("./api.js");
-  if (!(await remote.isBackendAvailable(true))) {
-    throw new Error("后端未连接，API Key 只保存在浏览器");
-  }
-  await remote.saveAppSetting(DEEPSEEK_SETTING_KEY, value);
+  return saveCachedSetting(DEEPSEEK_KEY, DEEPSEEK_SETTING_KEY, key, "后端未连接，API Key 只保存在浏览器");
 }
 
-export const FEISHU_WEBHOOK_SETTING_KEY = "FEISHU_WEBHOOK_URL";
-export const FEISHU_SECRET_SETTING_KEY = "FEISHU_WEBHOOK_SECRET";
-
 export async function getFeishuSettings() {
-  let url = "";
-  let secret = "";
-  try {
-    const remote = await import("./api.js");
-    if (await remote.isBackendAvailable()) {
-      const [urlData, secretData] = await Promise.all([
-        remote.getAppSetting(FEISHU_WEBHOOK_SETTING_KEY),
-        remote.getAppSetting(FEISHU_SECRET_SETTING_KEY),
-      ]);
-      url = String(urlData?.value || "").trim();
-      secret = String(secretData?.value || "").trim();
-      await chrome.storage.local.set({
-        [FEISHU_WEBHOOK_KEY]: url,
-        [FEISHU_SECRET_KEY]: secret,
-      });
-      return { url, secret };
-    }
-  } catch {
-    /* fall back to the local cache */
-  }
-  const data = await chrome.storage.local.get([FEISHU_WEBHOOK_KEY, FEISHU_SECRET_KEY]);
-  return {
-    url: String(data[FEISHU_WEBHOOK_KEY] || "").trim(),
-    secret: String(data[FEISHU_SECRET_KEY] || "").trim(),
-  };
+  const [url, secret] = await Promise.all([
+    getCachedSetting(FEISHU_WEBHOOK_KEY, FEISHU_WEBHOOK_SETTING_KEY),
+    getCachedSetting(FEISHU_SECRET_KEY, FEISHU_SECRET_SETTING_KEY),
+  ]);
+  return { url, secret };
 }
 
 export async function saveFeishuSettings(url, secret) {
