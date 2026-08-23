@@ -1,4 +1,5 @@
 import * as api from "./api.js";
+import { openContextMenu } from "./context-menu.js";
 import { el, icon, faviconImg, hasIcon } from "./dom.js";
 import { mergeDirtyWithRemote, pushDirtyRecords, withBackend } from "./persist.js";
 import { TOOLBOX_KEY } from "./settings.js";
@@ -156,8 +157,8 @@ export function renderToolboxSection({ items, onOpen, onEdit, onDelete, currentI
   return el(
     "div",
     { class: "tools-grid" },
-    items.map((item) =>
-      el(
+    items.map((item) => {
+      const card = el(
         "article",
         {
           class: `tool-card toolbox-card${String(item.id) === String(currentItemId) ? " current-page" : ""}`,
@@ -169,14 +170,15 @@ export function renderToolboxSection({ items, onOpen, onEdit, onDelete, currentI
           { class: "toolbox-main", type: "button", title: item.title, onClick: () => onOpen(item) },
           toolboxMark(item, "favicon"),
           el("strong", {}, item.title)
-        ),
-        el(
-          "div",
-          { class: "toolbox-actions" },
-          el("button", { class: "btn ghost icon", type: "button", title: "编辑", onClick: () => onEdit(item) }, icon("pencil")),
-          el("button", { class: "btn ghost icon", type: "button", title: "删除", onClick: () => onDelete(item) }, icon("trash"))
         )
-      )
-    )
+      );
+      card.addEventListener("contextmenu", (event) => {
+        openContextMenu(event, [
+          { label: "编辑", icon: "pencil", onClick: () => onEdit(item) },
+          { label: "删除", icon: "trash", danger: true, onClick: () => onDelete(item) },
+        ]);
+      });
+      return card;
+    })
   );
 }

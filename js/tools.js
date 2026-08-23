@@ -21,10 +21,9 @@ export function renderToolsHome(onOpen) {
     TOOLS.map((tool) =>
       el(
         "button",
-        { class: "tool-card", type: "button", onClick: () => onOpen(tool.id) },
+        { class: "tool-card", type: "button", title: tool.desc, onClick: () => onOpen(tool.id) },
         el("span", {}, icon(tool.icon)),
-        el("strong", {}, tool.name),
-        el("small", {}, tool.desc)
+        el("strong", {}, tool.name)
       )
     )
   );

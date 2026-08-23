@@ -694,30 +694,47 @@ button {
 }
 
 .tools-grid {
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .tool-card {
-  display: grid;
-  gap: 6px;
-  padding: 12px;
-  text-align: left;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 10px;
+  text-align: center;
   color: inherit;
   min-height: 92px;
 }
 
-.tool-card span {
-  width: 28px;
-  height: 28px;
-  display: grid;
-  place-items: center;
+.tool-card > span,
+.toolbox-icon {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto;
   color: var(--color-primary);
   background: var(--color-primary-soft);
-  border-radius: 7px;
+  border-radius: 10px;
+}
+
+.tool-card .icon-svg,
+.toolbox-icon .icon-svg {
+  display: block;
+  width: 24px;
+  height: 24px;
+  margin: 0;
+  flex: none;
 }
 
 .tool-card strong {
+  width: 100%;
   font-size: 13px;
+  text-align: center;
 }
 
 .tool-card small {
@@ -741,48 +758,80 @@ button {
 
 .toolbox-card {
   min-height: 0;
-  padding: 10px;
+  padding: 12px 10px;
 }
 
 .toolbox-main {
-  display: grid;
-  grid-template-columns: 20px minmax(0, 1fr);
-  gap: 8px;
+  display: flex;
+  flex-direction: column;
   align-items: center;
+  justify-content: center;
+  gap: 8px;
   width: 100%;
   min-width: 0;
   padding: 0;
   color: inherit;
-  text-align: left;
+  text-align: center;
   background: transparent;
   border: 0;
 }
 
+.toolbox-main .favicon {
+  display: block;
+  width: 40px;
+  height: 40px;
+  margin: 0 auto;
+  border-radius: 10px;
+}
+
 .toolbox-main strong {
   display: block;
+  width: 100%;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  text-align: center;
 }
 
-.toolbox-actions {
+.context-menu {
+  position: fixed;
+  z-index: 70;
+  min-width: 128px;
+  padding: 4px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+}
+
+.context-menu-item {
   display: flex;
-  justify-content: flex-end;
-  gap: 2px;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  text-align: left;
+  font-size: 12px;
+  font-weight: 700;
 }
 
-.toolbox-icon {
-  display: grid;
-  place-items: center;
-  color: var(--color-primary);
-  background: var(--color-primary-soft);
-  border-radius: 4px;
+.context-menu-item:hover {
+  background: var(--color-surface-soft);
 }
 
-.toolbox-icon .icon-svg {
+.context-menu-item.danger {
+  color: var(--color-danger);
+}
+
+.context-menu-item .icon-svg {
   width: 14px;
   height: 14px;
+  flex: none;
 }
 
 .icon-picker {
