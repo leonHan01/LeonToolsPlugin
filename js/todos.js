@@ -3,7 +3,6 @@ import { el, icon } from "./dom.js";
 import { notifyTodoCompleted, notifyTodoCreated } from "./feishu.js";
 import { mergeDirtyWithRemote, pushDirtyRecords, withBackend } from "./persist.js";
 import { TODOS_KEY } from "./settings.js";
-import { uid } from "./storage.js";
 import { renderAnalysisBar } from "./work-analysis.js";
 
 function emptyTodos() {
@@ -52,79 +51,53 @@ export async function refreshTodosFromBackend() {
 export async function createTodo(content) {
   const text = String(content || "").trim();
   if (!text) throw new Error("待办内容不能为空");
-  const state = await loadTodos();
-  const item = {
-    id: uid(),
-    content: text,
-    done: false,
-    sortOrder: state.todos.length,
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
-    dirty: true,
-  };
-  state.todos.push(item);
-  state.todos = sortTodos(state.todos);
-  await saveTodos(state);
+  const item = fromRemote(await api.createTodo({ content: text, done: false }));
+  const state = await loadTodos(); state.todos.push(item); state.todos = sortTodos(state.todos); await saveTodos(state);
   notifyTodoCreated(text);
-  if (!(await api.shouldUseBackend())) return item;
-  const remote = await withBackend("保存待办失败", async () =>
-    fromRemote(await api.createTodo({ content: text, done: item.done, sortOrder: item.sortOrder }))
-  );
-  if (!remote) return item;
-  const index = state.todos.findIndex((todo) => todo.id === item.id);
-  if (index >= 0) state.todos[index] = remote;
-  state.todos = sortTodos(state.todos);
-  await saveTodos(state);
-  return remote;
-}
-
-export async function updateTodo(todoId, patch) {
-  const state = await loadTodos();
-  const item = state.todos.find((todo) => String(todo.id) === String(todoId));
-  if (!item) throw new Error("待办不存在");
-  const wasDone = Boolean(item.done);
-  if (patch.content != null) {
-    const text = String(patch.content).trim();
-    if (!text) throw new Error("待办内容不能为空");
-    item.content = text;
-  }
-  if (patch.done != null) item.done = Boolean(patch.done);
-  item.updatedAt = Date.now();
-  item.dirty = true;
-  state.todos = sortTodos(state.todos);
-  await saveTodos(state);
-  if (!wasDone && item.done) notifyTodoCompleted(item.content);
-  if (api.isRemoteId(todoId) && (await api.shouldUseBackend())) {
-    const ok = await withBackend("更新待办失败", () => api.updateTodo(todoId, { content: item.content, done: item.done }));
-    if (ok !== undefined) {
-      item.dirty = false;
-      await saveTodos(state);
-    }
-  }
   return item;
 }
 
+export async function updateTodo(todoId, patch) {
+  const state = await loadTodos(); const item = state.todos.find((todo) => String(todo.id) === String(todoId));
+  if (!item) throw new Error("待办不存在");
+  if (!api.isRemoteId(todoId)) throw new Error("旧本地待办尚未同步到后端");
+  const content = patch.content != null ? String(patch.content).trim() : item.content;
+  if (!content) throw new Error("待办内容不能为空");
+  const updated = { ...item, content, done: patch.done != null ? Boolean(patch.done) : item.done, updatedAt: Date.now(), dirty: false };
+  await api.updateTodo(todoId, { content: updated.content, done: updated.done });
+  const latest = await loadTodos(); const index = latest.todos.findIndex((todo) => String(todo.id) === String(todoId));
+  if (index >= 0) latest.todos[index] = updated;
+  latest.todos = sortTodos(latest.todos); await saveTodos(latest);
+  if (!item.done && updated.done) notifyTodoCompleted(updated.content);
+  return updated;
+}
+
 export async function deleteTodo(todoId) {
-  const state = await loadTodos();
-  state.todos = state.todos.filter((item) => String(item.id) !== String(todoId));
-  await saveTodos(state);
-  if (api.isRemoteId(todoId) && (await api.shouldUseBackend())) {
-    await withBackend("删除待办失败", () => api.deleteTodo(todoId));
-  }
+  if (!api.isRemoteId(todoId)) throw new Error("旧本地待办尚未同步到后端");
+  await api.deleteTodo(todoId);
+  const state = await loadTodos(); state.todos = state.todos.filter((item) => String(item.id) !== String(todoId)); await saveTodos(state);
 }
 
 export async function pushLocalTodos() {
-  if (!(await api.shouldUseBackend(true))) return;
+  if (!(await api.shouldUseBackend(true))) return false;
   const state = await loadTodos();
-  await pushDirtyRecords(state.todos, {
-    create: async (item) => {
+  const checkpoint = async (item, oldId) => {
+    const latest = await loadTodos();
+    const index = latest.todos.findIndex((entry) => String(entry.id) === String(oldId));
+    if (index >= 0) { latest.todos[index] = item; await saveTodos(latest); }
+  };
+  const ok = await pushDirtyRecords(state.todos, {
+    create: async (item, oldId) => {
       const remote = await api.createTodo({ content: item.content });
+      item.id = String(remote.id);
+      await checkpoint(item, oldId);
       if (item.done) await api.updateTodo(String(remote.id), { content: item.content, done: true });
       return remote;
     },
     update: (item) => api.updateTodo(item.id, { content: item.content, done: item.done }),
+    checkpoint: (item, oldId) => checkpoint(item, api.isRemoteId(oldId) ? oldId : item.id),
   });
-  await saveTodos(state);
+  return ok;
 }
 
 export function renderTodosPage({ toast, confirmDelete, openSheet, closeSheet }) {

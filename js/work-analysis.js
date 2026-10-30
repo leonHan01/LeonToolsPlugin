@@ -41,6 +41,8 @@ export function ensureTldr(content) {
 }
 
 export async function analyzeWork() {
+  const { isBackendAvailable } = await import("./api.js");
+  if (!(await isBackendAvailable(true))) throw new Error("无法连接 Leon Workflow 后端");
   const [{ loadNotes }, { loadTodos }] = await Promise.all([import("./notes.js"), import("./todos.js")]);
   const [{ notes: allNotes }, { todos }] = await Promise.all([loadNotes(), loadTodos()]);
   const notes = allNotes.filter((item) => !item.archived);

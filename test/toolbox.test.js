@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { addToToolbox, findToolboxItemByUrl } from "../js/toolbox.js";
 import { TOOLBOX_KEY } from "../js/settings.js";
-import { installOfflineExtension } from "./helpers.js";
+import { installBackendExtension, installOfflineExtension } from "./helpers.js";
 
 test("findToolboxItemByUrl ignores hash", () => {
   const items = [{ id: "1", url: "https://www.feishu.cn/docs#x" }];
@@ -10,8 +10,8 @@ test("findToolboxItemByUrl ignores hash", () => {
   assert.equal(findToolboxItemByUrl(items, "https://other.com"), null);
 });
 
-test("addToToolbox stores locally and detects duplicates", async () => {
-  const env = installOfflineExtension();
+test("addToToolbox uses backend and detects duplicates", async () => {
+  const env = installBackendExtension();
   try {
     const first = await addToToolbox({ title: "飞书", url: "https://www.feishu.cn" });
     assert.equal(first.duplicated, false);

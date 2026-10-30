@@ -2,14 +2,14 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createTodo, deleteTodo, updateTodo } from "../js/todos.js";
 import { TODOS_KEY } from "../js/settings.js";
-import { installOfflineExtension } from "./helpers.js";
+import { installBackendExtension, installOfflineExtension } from "./helpers.js";
 
 test("createTodo rejects blank content", async () => {
   await assert.rejects(() => createTodo("  "), /待办内容不能为空/);
 });
 
-test("create update complete and delete todo locally", async () => {
-  const env = installOfflineExtension();
+test("create update complete and delete todo through the backend", async () => {
+  const env = installBackendExtension();
   try {
     const item = await createTodo("写测试");
     assert.equal(item.done, false);

@@ -3,7 +3,7 @@ import { el, icon } from "./dom.js";
 import { notifyNoteCreated } from "./feishu.js";
 import { mergeDirtyWithRemote, pushDirtyRecords, withBackend } from "./persist.js";
 import { NOTES_KEY } from "./settings.js";
-import { formatDateTime, uid } from "./storage.js";
+import { formatDateTime } from "./storage.js";
 import { renderAnalysisBar } from "./work-analysis.js";
 
 function emptyNotes() {
@@ -55,48 +55,25 @@ export async function refreshNotesFromBackend() {
 export async function createNote(content) {
   const text = String(content || "").trim();
   if (!text) throw new Error("便签内容不能为空");
-  const state = await loadNotes();
-  const note = {
-    id: uid(),
-    content: text,
-    archived: false,
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
-    dirty: true,
-  };
-  state.notes.push(note);
-  await saveNotes(state);
+  const note = fromRemote(await api.createNote({ content: text, archived: false }));
+  const state = await loadNotes(); state.notes.push(note); await saveNotes(state);
   notifyNoteCreated(text);
-  if (!(await api.shouldUseBackend())) return note;
-  const remote = await withBackend("保存便签失败", async () => fromRemote(await api.createNote(notePayload(note))));
-  if (!remote) return note;
-  const index = state.notes.findIndex((item) => item.id === note.id);
-  if (index >= 0) state.notes[index] = remote;
-  await saveNotes(state);
-  return remote;
+  return note;
 }
 
 export async function updateNote(noteId, patch = {}) {
   const state = await loadNotes();
   const note = state.notes.find((item) => String(item.id) === String(noteId));
   if (!note) throw new Error("便签不存在");
-  if (patch.content != null) {
-    const text = String(patch.content).trim();
-    if (!text) throw new Error("便签内容不能为空");
-    note.content = text;
-  }
-  if (patch.archived != null) note.archived = Boolean(patch.archived);
-  note.updatedAt = Date.now();
-  note.dirty = true;
-  await saveNotes(state);
-  if (api.isRemoteId(noteId) && (await api.shouldUseBackend())) {
-    const ok = await withBackend("更新便签失败", () => api.updateNote(noteId, notePayload(note)));
-    if (ok !== undefined) {
-      note.dirty = false;
-      await saveNotes(state);
-    }
-  }
-  return note;
+  if (!api.isRemoteId(noteId)) throw new Error("旧本地便签尚未同步到后端");
+  const content = patch.content != null ? String(patch.content).trim() : note.content;
+  if (!content) throw new Error("便签内容不能为空");
+  const updated = { ...note, content, archived: patch.archived != null ? Boolean(patch.archived) : note.archived, updatedAt: Date.now(), dirty: false };
+  await api.updateNote(noteId, notePayload(updated));
+  const latest = await loadNotes(); const index = latest.notes.findIndex((item) => String(item.id) === String(noteId));
+  if (index >= 0) latest.notes[index] = updated;
+  await saveNotes(latest);
+  return updated;
 }
 
 export async function deleteNote(noteId) {
@@ -104,21 +81,25 @@ export async function deleteNote(noteId) {
   const note = state.notes.find((item) => String(item.id) === String(noteId));
   if (!note) throw new Error("便签不存在");
   if (!note.archived) throw new Error("请先归档再删除便签");
-  state.notes = state.notes.filter((item) => String(item.id) !== String(noteId));
-  await saveNotes(state);
-  if (api.isRemoteId(noteId) && (await api.shouldUseBackend())) {
-    await withBackend("删除便签失败", () => api.deleteNote(noteId));
-  }
+  if (!api.isRemoteId(noteId)) throw new Error("旧本地便签尚未同步到后端");
+  await api.deleteNote(noteId);
+  const latest = await loadNotes(); latest.notes = latest.notes.filter((item) => String(item.id) !== String(noteId)); await saveNotes(latest);
 }
 
 export async function pushLocalNotes() {
-  if (!(await api.shouldUseBackend(true))) return;
+  if (!(await api.shouldUseBackend(true))) return false;
   const state = await loadNotes();
-  await pushDirtyRecords(state.notes, {
+  const checkpoint = async (note, oldId) => {
+    const latest = await loadNotes();
+    const index = latest.notes.findIndex((item) => String(item.id) === String(oldId));
+    if (index >= 0) { latest.notes[index] = note; await saveNotes(latest); }
+  };
+  const ok = await pushDirtyRecords(state.notes, {
     create: (note) => api.createNote(notePayload(note)),
     update: (note) => api.updateNote(note.id, notePayload(note)),
+    checkpoint,
   });
-  await saveNotes(state);
+  return ok;
 }
 
 export function renderNotesPage({ toast, confirmDelete, openSheet, closeSheet }) {

@@ -2,7 +2,6 @@ import { el, icon, faviconImg } from "./dom.js";
 import { DEFAULT_API_BASE, getApiBase, loadSyncMeta, saveUi } from "./settings.js";
 import { exportJson, formatDateTime, hostnameOf, importJson } from "./storage.js";
 import { isBackendAvailable } from "./api.js";
-import { syncNow } from "./sync.js";
 
 export const TOOLS = [
   { id: "sync", name: "后端同步", desc: "连接 Leon Workflow 并立即同步", icon: "cloud" },
@@ -29,7 +28,7 @@ export function renderToolsHome(onOpen) {
   );
 }
 
-export async function renderTool(toolId, { getActiveTab, toast, goHome, reload, confirmDelete, initialUrl }) {
+export async function renderTool(toolId, { getActiveTab, toast, goHome, reload, confirmDelete, initialUrl, sync }) {
   const header = (title) =>
     el(
       "div",
@@ -38,7 +37,7 @@ export async function renderTool(toolId, { getActiveTab, toast, goHome, reload, 
       el("h1", {}, title)
     );
 
-  if (toolId === "sync") return renderSyncTool(header, toast, reload);
+  if (toolId === "sync") return renderSyncTool(header, toast, reload, sync);
   if (toolId === "page") return renderPageTool(header, getActiveTab, toast, reload);
   if (toolId === "tabs") return renderTabsTool(header, toast, reload, confirmDelete);
   if (toolId === "json") return renderJsonTool(header, toast);
@@ -378,7 +377,7 @@ function renderTimeTool(header, toast) {
   );
 }
 
-async function renderSyncTool(header, toast, reload) {
+async function renderSyncTool(header, toast, reload, sync) {
   const meta = await loadSyncMeta();
   const base = await getApiBase();
   const input = el("input", { class: "input", id: "api-base", value: base, placeholder: DEFAULT_API_BASE });
@@ -389,7 +388,7 @@ async function renderSyncTool(header, toast, reload) {
     "div",
     { class: "stack" },
     header("后端同步"),
-    el("p", { class: "muted" }, "集合会同时写入浏览器本地，以及 leon_workflow 的 /api/web-collections。请先启动后端（默认 8080）。"),
+    el("p", { class: "muted" }, "数据保存在 Leon Workflow 后端。请先启动后端（默认 8080）。"),
     el("div", { class: "field" }, el("label", {}, "后端地址"), input),
     el("p", { class: "muted" }, status),
     el(
@@ -400,7 +399,7 @@ async function renderSyncTool(header, toast, reload) {
         onClick: async () => {
           const next = input.value.trim().replace(/\/$/, "") || DEFAULT_API_BASE;
           await saveUi({ apiBase: next });
-          const result = await syncNow();
+          const result = await sync();
           toast(result.ok ? "已保存" : result.error || "保存失败");
           if (reload) reload();
         },
@@ -431,8 +430,7 @@ function renderDataTool(header, toast, reload) {
     if (!picked) return;
     try {
       const count = await importJson(await picked.text());
-      const result = await syncNow();
-      toast(result.skipped ? `已导入 ${count} 个集合` : result.ok ? `已导入 ${count} 个集合` : `已导入 ${count} 个集合，后端暂不可用`);
+      toast(`已导入 ${count} 个集合`);
       if (reload) reload();
     } catch (error) {
       toast(error instanceof Error ? error.message : "导入失败");
@@ -443,7 +441,7 @@ function renderDataTool(header, toast, reload) {
     "div",
     { class: "stack" },
     header("导入导出"),
-    el("p", { class: "muted" }, "导出浏览器里的集合备份。导入后会写入浏览器，并尽量同步到 Leon Workflow。"),
+    el("p", { class: "muted" }, "导出当前集合缓存；导入需要连接 Leon Workflow 后端。"),
     el(
       "button",
       {

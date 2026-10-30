@@ -1,5 +1,5 @@
 import * as api from "./api.js";
-import { STORAGE_MODE_BROWSER, getStorageMode, loadSyncMeta, saveSyncMeta } from "./settings.js";
+import { loadSyncMeta, saveSyncMeta } from "./settings.js";
 import {
   fromRemoteCollection,
   isRemoteId,
@@ -47,9 +47,6 @@ export function getLastIdMap() {
 export async function syncNow() {
   const idMap = {};
   lastIdMap = idMap;
-  if ((await getStorageMode()) === STORAGE_MODE_BROWSER) {
-    return { ok: true, connected: false, skipped: true, idMap };
-  }
   const online = await api.isBackendAvailable(true);
   if (!online) {
     await saveSyncMeta({ connected: false, error: "无法连接 Leon Workflow 后端" });
@@ -57,9 +54,10 @@ export async function syncNow() {
   }
 
   try {
+    const needsLegacyOrder = collectionDirtyCount(await loadState()) > 0;
     await replayDeletes();
     await pushDirty(idMap);
-    await pushOrder();
+    if (needsLegacyOrder) await pushOrder();
     const local = await loadState();
     const extras = extrasFrom(local);
     const remoteList = await api.listFullCollections();
@@ -109,6 +107,7 @@ async function replayDeletes() {
     }
   }
   await saveSyncMeta({ pendingDeletes: remain });
+  if (remain.length) throw new Error("部分历史删除操作未能同步，请重试");
 }
 
 async function pushDirty(idMap) {
@@ -119,7 +118,8 @@ async function pushDirty(idMap) {
         await pushNewCollection(collection, idMap);
         await withState((current) => remapIds(current, idMap));
       } catch (error) {
-        await saveSyncMeta({ connected: false, error: error instanceof Error ? error.message : "上传集合失败" });
+        if (Object.keys(idMap).length) await withState((current) => remapIds(current, idMap));
+        throw error;
       }
       continue;
     }
@@ -160,7 +160,8 @@ async function pushDirty(idMap) {
         }
       }
     } catch (error) {
-      await saveSyncMeta({ connected: false, error: error instanceof Error ? error.message : "同步变更失败" });
+      if (Object.keys(idMap).length) await withState((current) => remapIds(current, idMap));
+      throw error;
     }
   }
   if (Object.keys(idMap).length) {
@@ -205,13 +206,10 @@ async function pushNewCollection(collection, idMap) {
 function remapIds(state, idMap) {
   for (const collection of state.collections) {
     if (idMap[collection.id]) collection.id = idMap[collection.id];
-    collection.dirty = isRemoteId(collection.id) ? false : collection.dirty;
     for (const group of collection.groups || []) {
       if (idMap[group.id]) group.id = idMap[group.id];
-      group.dirty = isRemoteId(group.id) ? false : group.dirty;
       for (const item of group.items || []) {
         if (idMap[item.id]) item.id = idMap[item.id];
-        item.dirty = isRemoteId(item.id) ? false : item.dirty;
       }
     }
   }

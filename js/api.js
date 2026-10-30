@@ -1,4 +1,4 @@
-import { getApiBase, getStorageMode, STORAGE_MODE_BACKEND, saveSyncMeta } from "./settings.js";
+import { getApiBase, saveSyncMeta } from "./settings.js";
 
 let availability = { at: 0, ok: false };
 
@@ -38,7 +38,6 @@ export async function isBackendAvailable(force = false) {
 }
 
 export async function shouldUseBackend(force = false) {
-  if ((await getStorageMode()) !== STORAGE_MODE_BACKEND) return false;
   return isBackendAvailable(force);
 }
 
@@ -53,11 +52,16 @@ export function markAvailability(ok, error = "") {
 
 export async function apiRequest(path, { method = "GET", body } = {}) {
   const base = await getApiBase();
-  const response = await fetch(`${base}${path}`, {
-    method,
-    headers: body != null ? { "Content-Type": "application/json" } : {},
-    body: body != null ? JSON.stringify(body) : undefined,
-  });
+  let response;
+  try {
+    response = await fetch(`${base}${path}`, {
+      method,
+      headers: body != null ? { "Content-Type": "application/json" } : {},
+      body: body != null ? JSON.stringify(body) : undefined,
+    });
+  } catch (error) {
+    throw new Error(`无法连接 Leon Workflow 后端：${error instanceof Error ? error.message : String(error)}`);
+  }
   const contentType = response.headers.get("content-type") || "";
   const payload = contentType.includes("application/json") ? await response.json() : await response.text();
   if (!response.ok) {

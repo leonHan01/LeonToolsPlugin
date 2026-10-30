@@ -2,19 +2,19 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createNote, deleteNote, updateNote } from "../js/notes.js";
 import { NOTES_KEY } from "../js/settings.js";
-import { installOfflineExtension } from "./helpers.js";
+import { installBackendExtension, installOfflineExtension } from "./helpers.js";
 
 test("createNote rejects blank content", async () => {
   await assert.rejects(() => createNote("  "), /便签内容不能为空/);
 });
 
-test("create update archive and delete note locally", async () => {
-  const env = installOfflineExtension();
+test("create update archive and delete note through the backend", async () => {
+  const env = installBackendExtension();
   try {
     const note = await createNote("一条便签");
     assert.equal(note.content, "一条便签");
     assert.equal(note.archived, false);
-    assert.equal(note.dirty, true);
+    assert.equal(note.dirty, false);
     const updated = await updateNote(note.id, { content: "改过了" });
     assert.equal(updated.content, "改过了");
     assert.equal(updated.archived, false);
@@ -43,7 +43,7 @@ test("updateNote rejects missing id", async () => {
 });
 
 test("updateNote rejects blank content", async () => {
-  const env = installOfflineExtension();
+  const env = installBackendExtension();
   try {
     const note = await createNote("一条便签");
     await assert.rejects(() => updateNote(note.id, { content: "  " }), /便签内容不能为空/);

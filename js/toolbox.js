@@ -3,7 +3,7 @@ import { openContextMenu } from "./context-menu.js";
 import { el, icon, faviconImg, hasIcon } from "./dom.js";
 import { mergeDirtyWithRemote, pushDirtyRecords, withBackend } from "./persist.js";
 import { TOOLBOX_KEY } from "./settings.js";
-import { hostnameOf, normalizeUrl, uid } from "./storage.js";
+import { hostnameOf, normalizeUrl } from "./storage.js";
 
 function emptyToolbox() {
   return { items: [] };
@@ -53,76 +53,39 @@ export function findToolboxItemByUrl(items, url) {
 
 export async function addToToolbox(page) {
   if (!page?.url) throw new Error("没有可加入的网页");
-  const state = await loadToolbox();
-  const existing = findToolboxItemByUrl(state.items, page.url);
+  const state = await loadToolbox(); const existing = findToolboxItemByUrl(state.items, page.url);
   if (existing) return { item: existing, duplicated: true };
-
-  const payload = {
-    name: api.clip(page.title || hostnameOf(page.url) || page.url, 200),
-    url: page.url,
-    favIconUrl: page.favIconUrl || "",
-    icon: "",
-  };
-
-  if (await api.shouldUseBackend()) {
-    const item = await withBackend("加入工具箱失败", async () => fromRemote(await api.createToolboxItem(payload)));
-    if (item) {
-      if (!state.items.some((entry) => String(entry.id) === item.id)) state.items.unshift(item);
-      await saveToolbox(state);
-      return { item, duplicated: false };
-    }
-  }
-
-  const item = {
-    id: uid(),
-    title: payload.name,
-    url: page.url,
-    favIconUrl: payload.favIconUrl,
-    icon: "",
-    sortOrder: 0,
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
-    dirty: true,
-  };
-  state.items.unshift(item);
-  await saveToolbox(state);
+  const item = fromRemote(await api.createToolboxItem({ name: api.clip(page.title || hostnameOf(page.url) || page.url, 200), url: page.url, favIconUrl: page.favIconUrl || "", icon: "" }));
+  const latest = await loadToolbox(); if (!latest.items.some((entry) => String(entry.id) === item.id)) latest.items.unshift(item); await saveToolbox(latest);
   return { item, duplicated: false };
 }
 
 export async function updateToolboxItem(itemId, patch) {
-  const state = await loadToolbox();
-  const item = state.items.find((entry) => String(entry.id) === String(itemId));
+  const state = await loadToolbox(); const item = state.items.find((entry) => String(entry.id) === String(itemId));
   if (!item) throw new Error("工具不存在");
-  if (patch.title != null) item.title = String(patch.title).trim() || item.title;
-  if (patch.url != null) item.url = String(patch.url).trim();
-  if (patch.icon != null) item.icon = String(patch.icon || "").trim();
-  item.updatedAt = Date.now();
-  item.dirty = true;
-  await saveToolbox(state);
-  if (api.isRemoteId(itemId) && (await api.shouldUseBackend())) {
-    const payload = { name: item.title, url: item.url, favIconUrl: item.favIconUrl || "", icon: item.icon || "" };
-    const ok = await withBackend("更新工具失败", () => api.updateToolboxItem(itemId, payload));
-    if (ok !== undefined) {
-      item.dirty = false;
-      await saveToolbox(state);
-    }
-  }
-  return item;
+  if (!api.isRemoteId(itemId)) throw new Error("旧本地工具尚未同步到后端");
+  const updated = { ...item, title: patch.title != null ? String(patch.title).trim() || item.title : item.title,
+    url: patch.url != null ? String(patch.url).trim() : item.url, icon: patch.icon != null ? String(patch.icon || "").trim() : item.icon, updatedAt: Date.now(), dirty: false };
+  await api.updateToolboxItem(itemId, { name: updated.title, url: updated.url, favIconUrl: updated.favIconUrl || "", icon: updated.icon || "" });
+  const latest = await loadToolbox(); const index = latest.items.findIndex((entry) => String(entry.id) === String(itemId)); if (index >= 0) latest.items[index] = updated; await saveToolbox(latest);
+  return updated;
 }
 
 export async function deleteToolboxItem(itemId) {
-  const state = await loadToolbox();
-  state.items = state.items.filter((item) => String(item.id) !== String(itemId));
-  await saveToolbox(state);
-  if (api.isRemoteId(itemId) && (await api.shouldUseBackend())) {
-    await withBackend("删除工具失败", () => api.deleteToolboxItem(itemId));
-  }
+  if (!api.isRemoteId(itemId)) throw new Error("旧本地工具尚未同步到后端");
+  await api.deleteToolboxItem(itemId);
+  const state = await loadToolbox(); state.items = state.items.filter((item) => String(item.id) !== String(itemId)); await saveToolbox(state);
 }
 
 export async function pushLocalToolbox() {
-  if (!(await api.shouldUseBackend(true))) return;
+  if (!(await api.shouldUseBackend(true))) return false;
   const state = await loadToolbox();
-  await pushDirtyRecords(state.items, {
+  const ok = await pushDirtyRecords(state.items, {
+    checkpoint: async (item, oldId) => {
+      const latest = await loadToolbox();
+      const index = latest.items.findIndex((entry) => String(entry.id) === String(oldId));
+      if (index >= 0) { latest.items[index] = item; await saveToolbox(latest); }
+    },
     create: (item) =>
       api.createToolboxItem({
         name: item.title,
@@ -138,7 +101,7 @@ export async function pushLocalToolbox() {
         icon: item.icon || "",
       }),
   });
-  await saveToolbox(state);
+  return ok;
 }
 
 export function toolboxMark(item, className = "favicon") {

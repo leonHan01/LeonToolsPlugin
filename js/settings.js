@@ -10,17 +10,15 @@ export const UI_KEY = "myWorkflow.ui";
 export const SYNC_KEY = "myWorkflow.sync";
 export const PENDING_KEY = "pendingAdd";
 export const DEFAULT_API_BASE = "http://127.0.0.1:8080";
-export const STORAGE_MODE_BACKEND = "backend";
-export const STORAGE_MODE_BROWSER = "browser";
 
 export async function loadUi() {
   const data = await chrome.storage.local.get(UI_KEY);
+  const { storageMode: _legacyStorageMode, ...stored } = data[UI_KEY] || {};
   return {
     lastCollectionId: null,
     lastTab: "collections",
     apiBase: DEFAULT_API_BASE,
-    storageMode: STORAGE_MODE_BACKEND,
-    ...(data[UI_KEY] || {}),
+    ...stored,
   };
 }
 
@@ -34,11 +32,6 @@ export async function saveUi(patch) {
 export async function getApiBase() {
   const ui = await loadUi();
   return String(ui.apiBase || DEFAULT_API_BASE).replace(/\/$/, "");
-}
-
-export async function getStorageMode() {
-  const ui = await loadUi();
-  return ui.storageMode === STORAGE_MODE_BROWSER ? STORAGE_MODE_BROWSER : STORAGE_MODE_BACKEND;
 }
 
 export const DEEPSEEK_SETTING_KEY = "DEEPSEEK_API_KEY";
@@ -65,12 +58,12 @@ async function getCachedSetting(localKey, remoteKey, { keepLocalIfRemoteEmpty = 
 
 async function saveCachedSetting(localKey, remoteKey, value, offlineMessage) {
   const next = String(value || "").trim();
-  await chrome.storage.local.set({ [localKey]: next });
   const remote = await import("./api.js");
   if (!(await remote.isBackendAvailable(true))) {
     throw new Error(offlineMessage);
   }
   await remote.saveAppSetting(remoteKey, next);
+  await chrome.storage.local.set({ [localKey]: next });
 }
 
 export async function getDeepseekKey() {
@@ -78,13 +71,13 @@ export async function getDeepseekKey() {
 }
 
 export async function saveDeepseekKey(key) {
-  return saveCachedSetting(DEEPSEEK_KEY, DEEPSEEK_SETTING_KEY, key, "后端未连接，API Key 只保存在浏览器");
+  return saveCachedSetting(DEEPSEEK_KEY, DEEPSEEK_SETTING_KEY, key, "后端未连接，无法保存 API Key");
 }
 
 export async function getFeishuSettings() {
   const [url, secret] = await Promise.all([
-    getCachedSetting(FEISHU_WEBHOOK_KEY, FEISHU_WEBHOOK_SETTING_KEY),
-    getCachedSetting(FEISHU_SECRET_KEY, FEISHU_SECRET_SETTING_KEY),
+    getCachedSetting(FEISHU_WEBHOOK_KEY, FEISHU_WEBHOOK_SETTING_KEY, { keepLocalIfRemoteEmpty: true }),
+    getCachedSetting(FEISHU_SECRET_KEY, FEISHU_SECRET_SETTING_KEY, { keepLocalIfRemoteEmpty: true }),
   ]);
   return { url, secret };
 }
@@ -92,16 +85,13 @@ export async function getFeishuSettings() {
 export async function saveFeishuSettings(url, secret) {
   const nextUrl = String(url || "").trim();
   const nextSecret = String(secret || "").trim();
-  await chrome.storage.local.set({
-    [FEISHU_WEBHOOK_KEY]: nextUrl,
-    [FEISHU_SECRET_KEY]: nextSecret,
-  });
   const remote = await import("./api.js");
   if (!(await remote.isBackendAvailable(true))) {
-    throw new Error("后端未连接，飞书 Webhook 只保存在浏览器");
+    throw new Error("后端未连接，无法保存飞书配置");
   }
   await remote.saveAppSetting(FEISHU_WEBHOOK_SETTING_KEY, nextUrl);
   await remote.saveAppSetting(FEISHU_SECRET_SETTING_KEY, nextSecret);
+  await chrome.storage.local.set({ [FEISHU_WEBHOOK_KEY]: nextUrl, [FEISHU_SECRET_KEY]: nextSecret });
 }
 
 export async function loadSyncMeta() {

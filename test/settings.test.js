@@ -3,12 +3,9 @@ import { test } from "node:test";
 import {
   DEFAULT_API_BASE,
   getApiBase,
-  getStorageMode,
   loadUi,
   queueDelete,
   saveUi,
-  STORAGE_MODE_BACKEND,
-  STORAGE_MODE_BROWSER,
 } from "../js/settings.js";
 import { installChrome, installOfflineExtension } from "./helpers.js";
 
@@ -16,16 +13,15 @@ test("loadUi fills defaults", async () => {
   installChrome();
   const ui = await loadUi();
   assert.equal(ui.apiBase, DEFAULT_API_BASE);
-  assert.equal(ui.storageMode, STORAGE_MODE_BACKEND);
+  assert.equal(ui.storageMode, undefined);
   assert.equal(ui.lastTab, "collections");
 });
 
-test("saveUi merges and getStorageMode recognizes browser", async () => {
+test("legacy browser mode is upgraded to backend", async () => {
   installChrome();
-  await saveUi({ storageMode: STORAGE_MODE_BROWSER, apiBase: "http://127.0.0.1:8080/" });
-  assert.equal(await getStorageMode(), STORAGE_MODE_BROWSER);
+  await saveUi({ storageMode: "browser", apiBase: "http://127.0.0.1:8080/" });
   assert.equal(await getApiBase(), "http://127.0.0.1:8080");
-  assert.equal((await loadUi()).storageMode, STORAGE_MODE_BROWSER);
+  assert.equal((await loadUi()).storageMode, undefined);
 });
 
 test("queueDelete appends pending ops", async () => {

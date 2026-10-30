@@ -146,10 +146,11 @@ async function ensureRemoteSession(store, session) {
   store.sessions = store.sessions.filter((item) => String(item.id) !== String(oldId));
   upsertSession(store, next);
   if (String(store.currentSessionId) === String(oldId)) store.currentSessionId = next.id;
+  await saveChat(store);
   return next;
 }
 
-async function pushSessionMessages(session) {
+async function pushSessionMessages(session, store) {
   if (!api.isRemoteId(session.id)) return session;
   for (const message of session.messages) {
     if (!String(message.content || "").trim()) continue;
@@ -160,6 +161,7 @@ async function pushSessionMessages(session) {
       reasoningContent: message.reasoning || "",
     });
     Object.assign(message, fromRemoteMessage(saved));
+    if (store) await saveChat(store);
   }
   session.messageCount = session.messages.length;
   return session;
@@ -201,18 +203,23 @@ export async function refreshSessionsFromBackend() {
 }
 
 export async function pushLocalSessions() {
-  if (!(await api.shouldUseBackend(true))) return;
+  if (!(await api.shouldUseBackend(true))) return false;
   const store = await loadChat();
-  await withBackend("同步对话失败", async () => {
-    for (const session of [...store.sessions]) {
+  const pending = store.sessions.filter((session) =>
+    (!api.isRemoteId(session.id) && session.messages.length) ||
+    session.messages.some((message) => message.dirty || !api.isRemoteId(message.id))
+  );
+  if (!pending.length) return true;
+  return Boolean(await withBackend("同步对话失败", async () => {
+    for (const session of pending) {
       const current = findSession(store, session.id) || session;
       if (!current.messages.length && !api.isRemoteId(current.id)) continue;
       const remoteSession = await ensureRemoteSession(store, current);
-      await pushSessionMessages(remoteSession);
+      await pushSessionMessages(remoteSession, store);
     }
     await saveChat(store);
     return true;
-  });
+  }));
 }
 
 export async function createSession(title = "新对话") {
@@ -220,25 +227,11 @@ export async function createSession(title = "新对话") {
   const store = await loadChat();
   if (label === "新对话") {
     const current = currentSession(store);
-    if (current && !current.messages.length) {
-      store.currentSessionId = current.id;
-      await saveChat(store);
-      return current;
-    }
+    if (current && !current.messages.length && api.isRemoteId(current.id)) return current;
   }
-  store.sessions = store.sessions.filter((item) => item.messages.length || api.isRemoteId(item.id));
-  let session = localSession({ title: label });
-  store.sessions.unshift(session);
-  store.currentSessionId = session.id;
-  await saveChat(store);
-  if (await api.shouldUseBackend()) {
-    const remote = await withBackend("新建对话失败", async () => {
-      const next = await ensureRemoteSession(store, session);
-      await saveChat(store);
-      return next;
-    });
-    if (remote) session = remote;
-  }
+  const remote = await api.createChatSession({ title: label });
+  const session = fromRemoteSession(remote, []);
+  const latest = await loadChat(); latest.sessions.unshift(session); latest.currentSessionId = session.id; await saveChat(latest);
   return session;
 }
 
@@ -249,7 +242,7 @@ export async function loadSession(sessionId) {
   if (await api.shouldUseBackend()) {
     const hydrated = await withBackend("加载对话失败", async () => {
       let next = await ensureRemoteSession(store, session);
-      await pushSessionMessages(next);
+      await pushSessionMessages(next, store);
       if (api.isRemoteId(next.id)) {
         next = mergeSession(next, await api.getChatSession(next.id));
       }
@@ -264,55 +257,26 @@ export async function loadSession(sessionId) {
 }
 
 export async function deleteSession(sessionId) {
-  const store = await loadChat();
-  const session = findSession(store, sessionId);
+  const store = await loadChat(); const session = findSession(store, sessionId);
   if (!session) return store;
-  if (await api.shouldUseBackend() && api.isRemoteId(session.id)) {
-    await withBackend("删除对话失败", () => api.deleteChatSession(session.id));
-  }
-  store.sessions = store.sessions.filter((item) => String(item.id) !== String(session.id));
-  if (String(store.currentSessionId) === String(session.id)) {
-    store.currentSessionId = sortedSessions(store)[0]?.id || null;
-  }
-  await saveChat(store);
-  return store;
+  if (!api.isRemoteId(session.id)) throw new Error("旧本地对话尚未同步到后端");
+  await api.deleteChatSession(session.id);
+  const latest = await loadChat(); latest.sessions = latest.sessions.filter((item) => String(item.id) !== String(session.id));
+  if (String(latest.currentSessionId) === String(session.id)) latest.currentSessionId = sortedSessions(latest)[0]?.id || null;
+  await saveChat(latest); return latest;
 }
 
 export async function appendMessage(partial) {
-  let store = await loadChat();
-  let session = currentSession(store);
-  if (!session) {
-    await createSession();
-    store = await loadChat();
-    session = currentSession(store);
-  }
-  if (!session) throw new Error("请先新建对话");
-  const message = {
-    id: uid(),
-    role: partial.role,
-    content: partial.content || "",
-    reasoning: partial.reasoning || "",
-    createdAt: Date.now(),
-    dirty: true,
-  };
-  session.messages.push(message);
-  session.messageCount = session.messages.length;
-  session.updatedAt = Date.now();
-  if (message.role === "user" && (session.title === "新对话" || !session.title)) {
-    session.title = clipTitle(message.content) || "新对话";
-  }
-  upsertSession(store, session);
-  store.currentSessionId = session.id;
-  await saveChat(store);
-  if (await api.shouldUseBackend()) {
-    await withBackend("保存对话失败", async () => {
-      session = await ensureRemoteSession(store, session);
-      await pushSessionMessages(session);
-      await saveChat(store);
-      return true;
-    });
-  }
-  return { session, message };
+  let store = await loadChat(); let session = currentSession(store);
+  if (!session) { await createSession(); store = await loadChat(); session = currentSession(store); }
+  if (!session || !api.isRemoteId(session.id)) throw new Error("旧本地对话尚未同步到后端");
+  const saved = await api.addChatMessage(session.id, { role: partial.role, content: partial.content || "", reasoningContent: partial.reasoning || "" });
+  const message = fromRemoteMessage(saved);
+  store = await loadChat(); session = findSession(store, session.id);
+  if (!session) throw new Error("对话已删除，但消息已保存到后端");
+  session.messages.push(message); session.messageCount = session.messages.length; session.updatedAt = Date.now();
+  if (message.role === "user" && (session.title === "新对话" || !session.title)) session.title = clipTitle(message.content) || "新对话";
+  await saveChat(store); return { session, message };
 }
 
 export async function requestChatCompletions(messages) {
@@ -417,10 +381,10 @@ export function renderChatPage({ toast, confirmDelete, openSheet, closeSheet }) 
     const text = input.value.trim();
     if (!text) return;
     sendBtn.disabled = true;
-    input.value = "";
-    input.style.height = "auto";
     try {
       await appendMessage({ role: "user", content: text });
+      input.value = "";
+      input.style.height = "auto";
       const store = await loadChat();
       renderStore(store, { role: "assistant", content: "正在回复…", pending: true });
       const session = currentSession(store);

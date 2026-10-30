@@ -2,12 +2,9 @@ import { el, icon, faviconImg, restoreFocus, TOOL_ICONS, hasIcon } from "./dom.j
 import { createIconPicker } from "./icon-picker.js";
 import {
   DEFAULT_API_BASE,
-  STORAGE_MODE_BACKEND,
-  STORAGE_MODE_BROWSER,
   getApiBase,
   getDeepseekKey,
   getFeishuSettings,
-  getStorageMode,
   saveDeepseekKey,
   saveFeishuSettings,
 } from "./settings.js";
@@ -64,6 +61,8 @@ const ui = {
 let state = { collections: [] };
 let currentTab = null;
 let applyingRemote = false;
+let syncPromise = null;
+let syncRetryTimer = null;
 
 const contentEl = document.getElementById("content");
 const sheetRoot = document.getElementById("sheet-root");
@@ -78,6 +77,11 @@ if (settingsBtn) {
   settingsBtn.append(icon("gear"), "设置");
   settingsBtn.addEventListener("click", () => openSettings());
 }
+
+window.addEventListener("unhandledrejection", (event) => {
+  event.preventDefault();
+  toast(event.reason instanceof Error ? event.reason.message : "操作失败，请检查后端连接");
+});
 
 init();
 
@@ -260,10 +264,7 @@ function openSheet(title, body, actions, onClose) {
 }
 
 async function openSettings() {
-  const mode = await getStorageMode();
   const base = await getApiBase();
-  const backend = el("input", { type: "radio", name: "storage-mode", value: STORAGE_MODE_BACKEND, checked: mode === STORAGE_MODE_BACKEND });
-  const browser = el("input", { type: "radio", name: "storage-mode", value: STORAGE_MODE_BROWSER, checked: mode === STORAGE_MODE_BROWSER });
   const apiInput = el("input", { class: "input", id: "api-base", value: base, placeholder: DEFAULT_API_BASE });
   const currentKey = await getDeepseekKey();
   const keyInput = el("input", {
@@ -295,9 +296,7 @@ async function openSettings() {
     el(
       "div",
       { class: "stack" },
-      el("div", { class: "field" }, el("label", {}, "数据保存位置")),
-      el("label", { class: "choice" }, backend, el("div", {}, el("strong", {}, "后端"), el("small", {}, "能连上 leon_workflow 时写入数据库；连不上则自动保存在浏览器。"))),
-      el("label", { class: "choice" }, browser, el("div", {}, el("strong", {}, "仅浏览器"), el("small", {}, "只保存在本机，不访问后端。"))),
+      el("p", { class: "muted" }, "数据保存在 Leon Workflow 后端，操作需要连接后端。"),
       el("div", { class: "field" }, el("label", {}, "后端地址"), apiInput),
       el("div", { class: "field" }, el("label", {}, "DeepSeek API Key"), keyInput),
       el("div", { class: "field" }, el("label", {}, "飞书 Webhook URL"), webhookInput),
@@ -311,9 +310,8 @@ async function openSettings() {
           class: "btn primary",
           type: "button",
           onClick: async () => {
-            const storageMode = backend.checked ? STORAGE_MODE_BACKEND : STORAGE_MODE_BROWSER;
             const apiBase = apiInput.value.trim().replace(/\/$/, "") || DEFAULT_API_BASE;
-            await saveUi({ storageMode, apiBase });
+            await saveUi({ apiBase });
             const messages = [];
             try {
               await saveDeepseekKey(keyInput.value);
@@ -328,7 +326,7 @@ async function openSettings() {
               messages.push(error instanceof Error ? error.message : "飞书配置未能写入数据库");
             }
             closeSheet();
-            if (storageMode === STORAGE_MODE_BACKEND) await syncInBackground();
+            await syncInBackground();
             toast(messages.join("；"));
           },
         },
@@ -361,9 +359,25 @@ function renderTodos() {
 }
 
 async function syncInBackground() {
+  if (syncPromise) return syncPromise;
+  clearTimeout(syncRetryTimer);
+  syncPromise = performBackgroundSync();
+  try {
+    return await syncPromise;
+  } finally {
+    syncPromise = null;
+  }
+}
+
+async function performBackgroundSync() {
   applyingRemote = true;
+  let retry = false;
   try {
     const result = await syncNow();
+    if (!result.ok) {
+      retry = true;
+      return result;
+    }
     if (result.idMap) {
       const mapped = applyIdMap(ui.collectionId, result.idMap);
       if (mapped !== ui.collectionId) {
@@ -371,16 +385,23 @@ async function syncInBackground() {
         saveUi({ lastCollectionId: mapped });
       }
     }
-    await pushLocalNotes();
-    await pushLocalTodos();
-    await pushLocalToolbox();
-    await pushLocalSessions();
+    const notesOk = await pushLocalNotes();
+    const todosOk = await pushLocalTodos();
+    const toolboxOk = await pushLocalToolbox();
+    const sessionsOk = await pushLocalSessions();
+    retry = !notesOk || !todosOk || !toolboxOk || !sessionsOk;
     await refreshNotesFromBackend();
     await refreshTodosFromBackend();
     await refreshSessionsFromBackend();
     await refreshView({ follow: true });
+    return retry ? { ok: false, error: "部分旧数据未能同步，稍后会重试" } : result;
+  } catch (error) {
+    retry = true;
+    console.error("后台同步失败", error);
+    return { ok: false, error: error instanceof Error ? error.message : "同步失败" };
   } finally {
     applyingRemote = false;
+    if (retry) syncRetryTimer = setTimeout(() => syncInBackground(), 30000);
   }
 }
 
@@ -1131,6 +1152,7 @@ async function renderTools() {
   const view = await renderTool(ui.toolId, {
     getActiveTab,
     toast,
+    sync: syncInBackground,
     confirmDelete,
     initialUrl: ui.toolUrl,
     goHome: () => {

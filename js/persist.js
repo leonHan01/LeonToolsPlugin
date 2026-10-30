@@ -17,19 +17,25 @@ export async function withBackend(failMessage, work) {
   }
 }
 
-export async function pushDirtyRecords(items, { create, update }) {
+export async function pushDirtyRecords(items, { create, update, checkpoint = async () => {} }) {
+  let ok = true;
   for (const item of items) {
     try {
+      const oldId = item.id;
       if (!api.isRemoteId(item.id)) {
-        const remote = await create(item);
+        const remote = await create(item, oldId);
         item.id = String(remote.id);
         item.dirty = false;
       } else if (item.dirty) {
         await update(item);
         item.dirty = false;
+      } else {
+        continue;
       }
+      await checkpoint(item, oldId);
     } catch {
-      /* keep local */
+      ok = false;
     }
   }
+  return ok;
 }

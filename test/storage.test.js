@@ -25,7 +25,7 @@ import {
   sortedCollections,
 } from "../js/storage.js";
 import { STORAGE_KEY } from "../js/settings.js";
-import { installOfflineExtension } from "./helpers.js";
+import { installBackendExtension, installOfflineExtension } from "./helpers.js";
 
 test("normalizeUrl strips hash and trailing slash", () => {
   assert.equal(normalizeUrl("https://example.com/path/?q=1#x"), "https://example.com/path/?q=1");
@@ -140,8 +140,8 @@ test("buildPageItem uses hostname when title missing", () => {
   assert.equal(item.dirty, true);
 });
 
-test("createCollection and duplicate page stay local in browser mode", async () => {
-  const env = installOfflineExtension();
+test("createCollection and duplicate page use the backend", async () => {
+  const env = installBackendExtension();
   try {
     const collection = await createCollection({ name: "科技", icon: "rocket" });
     assert.equal(collection.name, "科技");
@@ -163,7 +163,7 @@ test("createCollection and duplicate page stay local in browser mode", async () 
 });
 
 test("importJson remaps ids and prepends collections", async () => {
-  const env = installOfflineExtension();
+  const env = installBackendExtension();
   try {
     const count = await importJson(
       JSON.stringify({
@@ -180,7 +180,7 @@ test("importJson remaps ids and prepends collections", async () => {
     const imported = env.local.get(STORAGE_KEY).collections[0];
     assert.equal(imported.name, "导入");
     assert.equal(imported.icon, "star");
-    assert.equal(imported.dirty, true);
+    assert.equal(imported.dirty, false);
     assert.equal(imported.groups[0].items[0].url, "https://www.feishu.cn");
   } finally {
     env.restoreFetch();
@@ -188,7 +188,7 @@ test("importJson remaps ids and prepends collections", async () => {
 });
 
 test("moveItem relocates a page across groups", async () => {
-  const env = installOfflineExtension();
+  const env = installBackendExtension();
   try {
     const collection = await createCollection({ name: "科技" });
     const homeId = collection.groups[0].id;
@@ -233,7 +233,7 @@ test("moveItem relocates a page across groups", async () => {
 });
 
 test("moveItem reorders within the same group", async () => {
-  const env = installOfflineExtension();
+  const env = installBackendExtension();
   try {
     const collection = await createCollection({ name: "科技" });
     const groupId = collection.groups[0].id;
@@ -249,10 +249,10 @@ test("moveItem reorders within the same group", async () => {
 });
 
 test("moveItem rejects missing page", async () => {
-  const env = installOfflineExtension();
+  const env = installBackendExtension();
   try {
     const collection = await createCollection({ name: "科技" });
-    await assert.rejects(() => moveItem(collection.id, "missing", collection.groups[0].id), /网页不存在/);
+    await assert.rejects(() => moveItem(collection.id, "99999", collection.groups[0].id), /网页不存在/);
   } finally {
     env.restoreFetch();
   }
