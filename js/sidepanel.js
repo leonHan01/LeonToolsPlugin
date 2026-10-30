@@ -27,9 +27,9 @@ import {
   matchSavedCard,
   readPendingAdd,
   renameGroup,
+  moveItem,
   reorderCollections,
   reorderGroups,
-  reorderItems,
   saveUi,
   sameId,
   sortedCollections,
@@ -484,7 +484,7 @@ function renderCollectionList() {
 }
 
 function dragHandle(payload) {
-  const handle = el("span", { class: "drag-handle", title: "拖动排序", draggable: "true" }, icon("grip"));
+  const handle = el("span", { class: "drag-handle", title: payload.type === "item" ? "拖动排序或换分组" : "拖动排序", draggable: "true" }, icon("grip"));
   handle.addEventListener("dragstart", (event) => {
     event.dataTransfer.setData("text/plain", JSON.stringify(payload));
     event.dataTransfer.effectAllowed = "move";
@@ -500,8 +500,10 @@ function dragHandle(payload) {
 }
 
 function enableDrop(node, type, onDrop) {
+  const types = Array.isArray(type) ? type : [type];
   node.addEventListener("dragover", (event) => {
     event.preventDefault();
+    event.stopPropagation();
     event.dataTransfer.dropEffect = "move";
     node.classList.add("drag-over");
   });
@@ -518,7 +520,7 @@ function enableDrop(node, type, onDrop) {
     } catch {
       return;
     }
-    if (payload.type !== type) return;
+    if (!types.includes(payload.type)) return;
     await onDrop(payload);
   });
 }
@@ -642,12 +644,18 @@ function renderGroup(collection, group, keyword) {
     ),
     items.length
       ? items.map((item) => itemRow(collection, group, item, canDrag))
-      : el("div", { class: "empty", style: { minHeight: "72px", border: "0", borderRadius: "0" } }, keyword ? "没有匹配的网页" : "这个分组还没有网页")
+      : el("div", { class: "empty group-drop-hint", style: { minHeight: "72px", border: "0", borderRadius: "0" } }, keyword ? "没有匹配的网页" : "这个分组还没有网页")
   );
   if (canDrag) {
-    enableDrop(section, "group", async (payload) => {
-      if (sameId(payload.id, group.id)) return;
-      await reorderGroups(collection.id, payload.id, group.id);
+    enableDrop(section, ["group", "item"], async (payload) => {
+      if (payload.type === "group") {
+        if (sameId(payload.id, group.id)) return;
+        await reorderGroups(collection.id, payload.id, group.id);
+      } else {
+        const last = group.items[group.items.length - 1];
+        if (sameId(payload.groupId, group.id) && last && sameId(last.id, payload.id)) return;
+        await moveItem(collection.id, payload.id, group.id);
+      }
       await refreshState();
       render();
     });
@@ -687,8 +695,8 @@ function itemRow(collection, group, item, canDrag) {
   );
   if (canDrag) {
     enableDrop(row, "item", async (payload) => {
-      if (!sameId(payload.groupId, group.id) || sameId(payload.id, item.id)) return;
-      await reorderItems(collection.id, group.id, payload.id, item.id);
+      if (sameId(payload.id, item.id)) return;
+      await moveItem(collection.id, payload.id, group.id, item.id);
       await refreshState();
       render();
     });

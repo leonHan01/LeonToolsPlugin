@@ -58,7 +58,7 @@ Restart leon_workflow after backend code changes so JPA can add tables and colum
 - Create / edit a collection to pick an icon (same default set as the toolbox). The colored dot is used when no icon is set.
 - Duplicate URLs are not added twice in the same collection.
 - Breadcrumb: `Collection list` / `{name}`.
-- Drag the six-dot handle to reorder collections, groups, and pages. Order is stored as `sort_order` in backend mode.
+- Drag the six-dot handle to reorder collections, groups, and pages. Pages can be dropped onto another group. Order is stored as `sort_order` in backend mode.
 - Clicking a saved page focuses an existing tab when possible.
 - Cards show title (and note), not the URL.
 - Right-click a page or link → **Add to webpage collection**.
@@ -80,7 +80,8 @@ Built-in tools:
 ## Notes
 
 - Type at the bottom and press Enter. Data is stored in `/api/notes` or the browser.
-- **AI analysis** (top right) sends all notes and todos to the LLM. The reply starts with `TL;DR:` and is also saved as an LLM session named “工作分析”.
+- **Active / Archived** tabs. Active notes can be edited or archived; only archived notes can be deleted or restored. Active notes cannot be deleted.
+- **AI analysis** (top right) sends **unarchived** notes and todos to the LLM. The reply starts with `TL;DR:` and is also saved as an LLM session named “工作分析”.
 - Creating a note can push a Feishu card titled **新增便签** if a webhook is configured.
 
 ## Todos

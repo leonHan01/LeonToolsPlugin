@@ -400,6 +400,10 @@ button {
   box-shadow: inset 0 0 0 1px var(--color-primary);
 }
 
+.group.drag-over .group-drop-hint {
+  color: var(--color-primary-strong);
+}
+
 .collection-main {
   display: grid;
   gap: 4px;
@@ -991,6 +995,11 @@ button {
   border-radius: 12px 12px 4px 12px;
 }
 
+.note-bubble.archived {
+  background: var(--color-surface-soft);
+  border-color: var(--color-line);
+}
+
 .note-text {
   white-space: pre-wrap;
   word-break: break-word;
@@ -1021,6 +1030,10 @@ button {
   padding: 8px 10px 10px;
   background: var(--color-surface);
   border-top: 1px solid var(--color-line);
+}
+
+.notes-composer[hidden] {
+  display: none;
 }
 
 .notes-input {
@@ -1098,7 +1111,52 @@ button {
 .page-toolbar {
   display: flex;
   justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
   padding: 8px 10px 0;
+}
+
+.page-toolbar > .btn {
+  flex: none;
+}
+
+.page-toolbar:has(.notes-filter) {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--color-line);
+}
+
+.notes-filter {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px;
+  padding: 3px;
+  background: var(--color-bg-soft);
+  border: 1px solid var(--color-line);
+  border-radius: 8px;
+}
+
+.notes-filter-tab {
+  min-width: 0;
+  min-height: 28px;
+  padding: 0 8px;
+  color: var(--color-muted);
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.notes-filter-tab:hover {
+  color: var(--color-primary-strong);
+}
+
+.notes-filter-tab.active {
+  color: var(--color-primary-strong);
+  background: var(--color-surface);
+  box-shadow: 0 1px 2px rgba(20, 33, 61, 0.1);
 }
 
 .analysis-result {

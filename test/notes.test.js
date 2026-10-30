@@ -8,14 +8,23 @@ test("createNote rejects blank content", async () => {
   await assert.rejects(() => createNote("  "), /便签内容不能为空/);
 });
 
-test("create update and delete note locally", async () => {
+test("create update archive and delete note locally", async () => {
   const env = installOfflineExtension();
   try {
     const note = await createNote("一条便签");
     assert.equal(note.content, "一条便签");
+    assert.equal(note.archived, false);
     assert.equal(note.dirty, true);
-    const updated = await updateNote(note.id, "改过了");
+    const updated = await updateNote(note.id, { content: "改过了" });
     assert.equal(updated.content, "改过了");
+    assert.equal(updated.archived, false);
+    await assert.rejects(() => deleteNote(note.id), /请先归档再删除便签/);
+    const archived = await updateNote(note.id, { archived: true });
+    assert.equal(archived.archived, true);
+    assert.equal(archived.content, "改过了");
+    const restored = await updateNote(note.id, { archived: false });
+    assert.equal(restored.archived, false);
+    await updateNote(note.id, { archived: true });
     await deleteNote(note.id);
     assert.deepEqual(env.local.get(NOTES_KEY).notes, []);
   } finally {
@@ -23,7 +32,22 @@ test("create update and delete note locally", async () => {
   }
 });
 
+test("deleteNote rejects missing id", async () => {
+  installOfflineExtension();
+  await assert.rejects(() => deleteNote("missing"), /便签不存在/);
+});
+
 test("updateNote rejects missing id", async () => {
   installOfflineExtension();
-  await assert.rejects(() => updateNote("missing", "x"), /便签不存在/);
+  await assert.rejects(() => updateNote("missing", { content: "x" }), /便签不存在/);
+});
+
+test("updateNote rejects blank content", async () => {
+  const env = installOfflineExtension();
+  try {
+    const note = await createNote("一条便签");
+    await assert.rejects(() => updateNote(note.id, { content: "  " }), /便签内容不能为空/);
+  } finally {
+    env.restoreFetch();
+  }
 });

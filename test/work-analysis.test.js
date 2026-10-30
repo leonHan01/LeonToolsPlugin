@@ -26,6 +26,24 @@ test("snapshotPrompt has empty placeholders", () => {
   assert.match(text, /没有已完成待办/);
 });
 
+test("snapshotPrompt omits archived notes", () => {
+  const text = snapshotPrompt(
+    [
+      { content: "进行中", archived: false },
+      { content: "旧记录", archived: true },
+    ],
+    []
+  );
+  assert.match(text, /进行中/);
+  assert.doesNotMatch(text, /旧记录/);
+});
+
+test("snapshotPrompt treats only-archived notes as empty", () => {
+  const text = snapshotPrompt([{ content: "旧记录", archived: true }], []);
+  assert.match(text, /暂无便签/);
+  assert.doesNotMatch(text, /旧记录/);
+});
+
 test("ensureTldr prefixes missing summary", () => {
   const withPrefix = ensureTldr("TL;DR：先做测试\n\n详情");
   assert.equal(withPrefix.startsWith("TL;DR："), true);

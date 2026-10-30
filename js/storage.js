@@ -373,10 +373,12 @@ export async function updateItem(collectionId, itemId, patch) {
     if (patch.url != null) current.url = patch.url.trim();
     if (patch.note != null) current.note = patch.note.trim();
     if (patch.groupId && !sameId(patch.groupId, located.group.id)) {
-      const target = findGroup(collection, patch.groupId);
+      const target = (collection.groups || []).find((entry) => sameId(entry.id, patch.groupId));
       if (!target) throw new Error("分组不存在");
       located.group.items = located.group.items.filter((entry) => !sameId(entry.id, itemId));
+      reindex(located.group.items);
       target.items.unshift(current);
+      reindex(target.items);
     }
     current.dirty = true;
     collection.updatedAt = now();
@@ -497,24 +499,99 @@ export async function reorderGroups(collectionId, draggedId, targetId) {
   }
 }
 
-export async function reorderItems(collectionId, groupId, draggedId, targetId) {
-  const itemIds = await withState((state) => {
-    const collection = findCollection(state, collectionId);
-    const group = findGroup(collection, groupId);
-    if (!collection || !group) throw new Error("分组不存在");
-    group.items = reindex(moveById(group.items, draggedId, targetId));
+function requireGroup(collection, groupId) {
+  const group = (collection?.groups || []).find((entry) => sameId(entry.id, groupId));
+  if (!group) throw new Error("分组不存在");
+  return group;
+}
+
+function remoteItemIds(items) {
+  return items.map((item) => item.id).filter((id) => api.isRemoteId(id));
+}
+
+export async function moveItem(collectionId, itemId, targetGroupId, targetItemId = null) {
+  const result = await withState((state) => {
+    const located = locateItem(state, collectionId, itemId);
+    if (!located) throw new Error("网页不存在");
+    const { collection, group: sourceGroup, item } = located;
+    const targetGroup = requireGroup(collection, targetGroupId);
+    const sameGroup = sameId(sourceGroup.id, targetGroup.id);
+
+    if (sameGroup) {
+      if (targetItemId) {
+        const next = moveById(targetGroup.items, itemId, targetItemId);
+        if (next === targetGroup.items) {
+          return { changed: false, item, sameGroup, sourceGroup, targetGroup };
+        }
+        targetGroup.items = reindex(next);
+      } else {
+        const from = targetGroup.items.findIndex((entry) => sameId(entry.id, itemId));
+        if (from < 0 || from === targetGroup.items.length - 1) {
+          return { changed: false, item, sameGroup, sourceGroup, targetGroup };
+        }
+        const [moved] = targetGroup.items.splice(from, 1);
+        targetGroup.items.push(moved);
+        reindex(targetGroup.items);
+      }
+    } else {
+      sourceGroup.items = sourceGroup.items.filter((entry) => !sameId(entry.id, itemId));
+      reindex(sourceGroup.items);
+      if (targetItemId) {
+        const to = targetGroup.items.findIndex((entry) => sameId(entry.id, targetItemId));
+        if (to < 0) targetGroup.items.push(item);
+        else targetGroup.items.splice(to, 0, item);
+      } else {
+        targetGroup.items.push(item);
+      }
+      reindex(targetGroup.items);
+      item.dirty = true;
+    }
+
     collection.updatedAt = now();
-    return group.items.map((item) => item.id);
+    return {
+      changed: true,
+      item,
+      sameGroup,
+      sourceGroupId: sourceGroup.id,
+      targetGroupId: targetGroup.id,
+      sourceIds: remoteItemIds(sourceGroup.items),
+      targetIds: remoteItemIds(targetGroup.items),
+    };
   });
-  if (api.isRemoteId(collectionId) && api.isRemoteId(groupId)) {
-    await persistRemoteOrder(() =>
-      api.reorderItems(
-        collectionId,
-        groupId,
-        itemIds.filter((id) => api.isRemoteId(id))
-      )
-    );
+
+  if (!result.changed) return result.item;
+  if (!(await api.shouldUseBackend()) || !api.isRemoteId(collectionId)) return result.item;
+
+  if (result.sameGroup) {
+    if (api.isRemoteId(result.targetGroupId)) {
+      await persistRemoteOrder(() => api.reorderItems(collectionId, result.targetGroupId, result.targetIds));
+    }
+    return result.item;
   }
+
+  if (api.isRemoteId(result.item.id) && api.isRemoteId(result.targetGroupId)) {
+    await withBackend("移动网页失败", async () => {
+      await api.updateItem(collectionId, result.item.id, {
+        groupId: Number(result.targetGroupId),
+        name: api.clip(result.item.title, 200),
+        url: result.item.url,
+        note: result.item.note || "",
+      });
+      await api.reorderItems(collectionId, result.targetGroupId, result.targetIds);
+      if (api.isRemoteId(result.sourceGroupId)) {
+        await api.reorderItems(collectionId, result.sourceGroupId, result.sourceIds);
+      }
+      await withState((state) => {
+        const current = locateItem(state, collectionId, result.item.id);
+        if (current) current.item.dirty = false;
+      });
+    });
+  }
+  return result.item;
+}
+
+export async function reorderItems(collectionId, groupId, draggedId, targetId) {
+  return moveItem(collectionId, draggedId, groupId, targetId);
 }
 
 async function persistRemoteOrder(send) {

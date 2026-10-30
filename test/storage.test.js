@@ -6,6 +6,7 @@ import {
   collectionItemCount,
   colorFromId,
   createCollection,
+  createGroup,
   emptyCollection,
   findCollection,
   findGroup,
@@ -17,6 +18,7 @@ import {
   importJson,
   locateItem,
   moveById,
+  moveItem,
   normalizeUrl,
   reindex,
   sameId,
@@ -180,6 +182,77 @@ test("importJson remaps ids and prepends collections", async () => {
     assert.equal(imported.icon, "star");
     assert.equal(imported.dirty, true);
     assert.equal(imported.groups[0].items[0].url, "https://www.feishu.cn");
+  } finally {
+    env.restoreFetch();
+  }
+});
+
+test("moveItem relocates a page across groups", async () => {
+  const env = installOfflineExtension();
+  try {
+    const collection = await createCollection({ name: "科技" });
+    const homeId = collection.groups[0].id;
+    const docs = await createGroup(collection.id, "文档");
+    const feishu = await addPageToCollection(collection.id, homeId, {
+      title: "飞书",
+      url: "https://www.feishu.cn",
+    });
+    const github = await addPageToCollection(collection.id, homeId, {
+      title: "GitHub",
+      url: "https://github.com",
+    });
+
+    await moveItem(collection.id, feishu.item.id, docs.id);
+    let saved = env.local.get(STORAGE_KEY).collections[0];
+    assert.deepEqual(
+      saved.groups.find((group) => group.id === homeId).items.map((item) => item.title),
+      ["GitHub"]
+    );
+    assert.deepEqual(
+      saved.groups.find((group) => group.id === docs.id).items.map((item) => item.title),
+      ["飞书"]
+    );
+
+    await moveItem(collection.id, github.item.id, docs.id, feishu.item.id);
+    saved = env.local.get(STORAGE_KEY).collections[0];
+    assert.deepEqual(
+      saved.groups.find((group) => group.id === homeId).items.map((item) => item.title),
+      []
+    );
+    assert.deepEqual(
+      saved.groups.find((group) => group.id === docs.id).items.map((item) => item.title),
+      ["GitHub", "飞书"]
+    );
+    assert.deepEqual(
+      saved.groups.find((group) => group.id === docs.id).items.map((item) => item.sortOrder),
+      [0, 1]
+    );
+  } finally {
+    env.restoreFetch();
+  }
+});
+
+test("moveItem reorders within the same group", async () => {
+  const env = installOfflineExtension();
+  try {
+    const collection = await createCollection({ name: "科技" });
+    const groupId = collection.groups[0].id;
+    const a = await addPageToCollection(collection.id, groupId, { title: "A", url: "https://a.example" });
+    await addPageToCollection(collection.id, groupId, { title: "B", url: "https://b.example" });
+    const c = await addPageToCollection(collection.id, groupId, { title: "C", url: "https://c.example" });
+    await moveItem(collection.id, a.item.id, groupId, c.item.id);
+    const items = env.local.get(STORAGE_KEY).collections[0].groups[0].items;
+    assert.deepEqual(items.map((item) => item.title), ["A", "C", "B"]);
+  } finally {
+    env.restoreFetch();
+  }
+});
+
+test("moveItem rejects missing page", async () => {
+  const env = installOfflineExtension();
+  try {
+    const collection = await createCollection({ name: "科技" });
+    await assert.rejects(() => moveItem(collection.id, "missing", collection.groups[0].id), /网页不存在/);
   } finally {
     env.restoreFetch();
   }

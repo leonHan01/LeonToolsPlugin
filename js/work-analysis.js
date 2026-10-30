@@ -14,13 +14,14 @@ function linesOf(items, emptyLabel) {
 }
 
 export function snapshotPrompt(notes, todos) {
+  const activeNotes = notes.filter((item) => !item.archived);
   const openTodos = todos.filter((item) => !item.done);
   const doneTodos = todos.filter((item) => item.done);
   return [
     "请分析我的工作并帮助提升效率。回复必须以「TL;DR：」开头。",
     "",
     "【便签】",
-    linesOf(notes.map((item) => item.content), "（暂无便签）"),
+    linesOf(activeNotes.map((item) => item.content), "（暂无便签）"),
     "",
     "【未完成待办】",
     linesOf(openTodos.map((item) => item.content), "（没有未完成待办）"),
@@ -41,7 +42,8 @@ export function ensureTldr(content) {
 
 export async function analyzeWork() {
   const [{ loadNotes }, { loadTodos }] = await Promise.all([import("./notes.js"), import("./todos.js")]);
-  const [{ notes }, { todos }] = await Promise.all([loadNotes(), loadTodos()]);
+  const [{ notes: allNotes }, { todos }] = await Promise.all([loadNotes(), loadTodos()]);
+  const notes = allNotes.filter((item) => !item.archived);
   if (!notes.length && !todos.length) {
     throw new Error("还没有便签或待办可分析");
   }
@@ -64,8 +66,8 @@ export async function analyzeWork() {
   return { content, reasoning: reply.reasoning };
 }
 
-export function renderAnalysisBar({ toast, openSheet, closeSheet }) {
-  const btn = el("button", { class: "btn ghost", type: "button", title: "用 LLM 分析便签和待办" }, icon("sparkles"), "AI分析");
+export function renderAnalysisBar({ toast, openSheet, closeSheet, leading } = {}) {
+  const btn = el("button", { class: "btn ghost", type: "button", title: "用 LLM 分析未归档便签和待办" }, icon("sparkles"), "AI分析");
   btn.addEventListener("click", async () => {
     btn.disabled = true;
     try {
@@ -82,5 +84,5 @@ export function renderAnalysisBar({ toast, openSheet, closeSheet }) {
       btn.disabled = false;
     }
   });
-  return el("div", { class: "page-toolbar" }, btn);
+  return el("div", { class: "page-toolbar" }, leading, btn);
 }
