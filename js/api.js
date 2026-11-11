@@ -1,4 +1,4 @@
-import { getApiBase, saveSyncMeta } from "./settings.js";
+import { getApiBase, getApiToken, saveSyncMeta } from "./settings.js";
 
 let availability = { at: 0, ok: false };
 
@@ -28,7 +28,9 @@ export async function isBackendAvailable(force = false) {
     const base = await getApiBase();
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 2500);
-    const response = await fetch(`${base}/api/web-collections`, { signal: controller.signal });
+    const token = await getApiToken(base);
+    const headers = token ? { Authorization: `Bearer ${token}` } : {};
+    const response = await fetch(`${base}/api/web-collections`, { signal: controller.signal, headers, redirect: "error" });
     clearTimeout(timer);
     availability = { at: Date.now(), ok: response.ok };
   } catch {
@@ -52,11 +54,13 @@ export function markAvailability(ok, error = "") {
 
 export async function apiRequest(path, { method = "GET", body } = {}) {
   const base = await getApiBase();
+  const token = await getApiToken(base);
   let response;
   try {
     response = await fetch(`${base}${path}`, {
       method,
-      headers: body != null ? { "Content-Type": "application/json" } : {},
+      headers: { ...(body != null ? { "Content-Type": "application/json" } : {}), ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      redirect: "error",
       body: body != null ? JSON.stringify(body) : undefined,
     });
   } catch (error) {

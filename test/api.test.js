@@ -76,3 +76,29 @@ test("apiRequest throws when success is false", async () => {
     globalThis.fetch = original;
   }
 });
+
+test("authenticated requests and availability use the session token only for its configured origin", async () => {
+  const { saveApiToken, saveUi } = await import("../js/settings.js");
+  const { isBackendAvailable } = await import("../js/api.js");
+  installChrome({ local: { "myWorkflow.ui": browserUi({ apiBase: "https://example.test:8080" }) } });
+  await saveApiToken("https://example.test:8080", "session-token");
+  const original = globalThis.fetch;
+  const requests = [];
+  globalThis.fetch = async (url, options) => {
+    requests.push({ url, options });
+    return { ok: true, headers: { get: () => "application/json" }, json: async () => ({ success: true, data: [] }) };
+  };
+  try {
+    assert.equal(await isBackendAvailable(true), true);
+    await apiRequest("/api/notes");
+    assert.equal(requests[0].options.headers.Authorization, "Bearer session-token");
+    assert.equal(requests[1].options.headers.Authorization, "Bearer session-token");
+    assert.equal(requests[1].options.redirect, "error");
+    await saveUi({ apiBase: "https://other.test" });
+    await apiRequest("/api/notes");
+    assert.equal(requests[2].options.headers.Authorization, undefined);
+    await assert.rejects(() => saveApiToken("http://remote.test", "token"), /HTTPS/);
+  } finally {
+    globalThis.fetch = original;
+  }
+});

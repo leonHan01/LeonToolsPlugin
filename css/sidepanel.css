@@ -67,6 +67,12 @@ button {
   font-weight: 700;
 }
 
+.collection-card strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .item-main small,
 .muted {
   color: var(--color-muted);
@@ -441,9 +447,14 @@ button {
 
 .collection-card .head {
   display: grid;
-  grid-template-columns: 18px 20px minmax(0, 1fr);
+  grid-template-columns: 18px 36px minmax(0, 1fr) auto;
   gap: 8px;
-  align-items: start;
+  align-items: center;
+}
+
+.collection-card .head .dot {
+  margin-top: 0;
+  justify-self: center;
 }
 
 .dot {
@@ -455,19 +466,18 @@ button {
 }
 
 .collection-icon {
-  width: 20px;
-  height: 20px;
+  width: 36px;
+  height: 36px;
   display: grid;
   place-items: center;
-  margin-top: 1px;
   color: var(--color-primary);
   background: var(--color-primary-soft);
-  border-radius: 5px;
+  border-radius: 8px;
 }
 
 .collection-icon .icon-svg {
-  width: 13px;
-  height: 13px;
+  width: 22px;
+  height: 22px;
 }
 
 .collection-card p {
@@ -493,6 +503,7 @@ button {
   display: flex;
   justify-content: flex-end;
   gap: 6px;
+  flex-wrap: nowrap;
 }
 
 .empty {
@@ -1069,8 +1080,56 @@ button {
   overflow: auto;
   display: grid;
   align-content: start;
-  gap: 8px;
+  gap: 14px;
   padding: 12px 10px 8px;
+}
+
+.todo-group {
+  display: grid;
+  gap: 8px;
+}
+
+.todo-group.nested {
+  margin-left: 12px;
+}
+
+.todo-group.collapsed .todo-group-body {
+  display: none;
+}
+
+.todo-day {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin: 0;
+  padding: 0 2px;
+  color: var(--color-muted);
+  background: transparent;
+  border: 0;
+  font-size: 12px;
+  font-weight: 700;
+  text-align: left;
+}
+
+.todo-fold {
+  width: 14px;
+  height: 14px;
+  transform: rotate(90deg);
+}
+
+.todo-group.collapsed .todo-fold {
+  transform: rotate(180deg);
+}
+
+.todo-day-date {
+  color: var(--color-text);
+  font-size: 13px;
+}
+
+.todo-day-distance {
+  margin-left: auto;
+  color: var(--color-primary);
 }
 
 .todo-item {
@@ -1084,23 +1143,58 @@ button {
   border-radius: 8px;
 }
 
-.todo-item.done .todo-text {
+.todo-item.done button.todo-text,
+.todo-item.done .todo-body {
   color: var(--color-muted);
   text-decoration: line-through;
 }
 
 .todo-text {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+  color: inherit;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+button.todo-text {
+  display: block;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.todo-body {
   min-width: 0;
   padding: 0;
   overflow: hidden;
   color: inherit;
   text-align: left;
   text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: pre;
   background: transparent;
   border: 0;
-  font-size: 13px;
-  font-weight: 600;
+  font: inherit;
+}
+
+.todo-link {
+  flex: none;
+  padding: 0 2px;
+  color: var(--color-primary);
+  background: transparent;
+  border: 0;
+  font: inherit;
+  font-weight: 700;
+}
+
+.todo-item.done .todo-link {
+  color: var(--color-primary);
+  text-decoration: none;
 }
 
 .todo-actions {

@@ -1,5 +1,5 @@
 import { el, icon, faviconImg } from "./dom.js";
-import { DEFAULT_API_BASE, getApiBase, loadSyncMeta, saveUi } from "./settings.js";
+import { DEFAULT_API_BASE, getApiBase, loadSyncMeta, saveUi, saveApiToken } from "./settings.js";
 import { exportJson, formatDateTime, hostnameOf, importJson } from "./storage.js";
 import { isBackendAvailable } from "./api.js";
 
@@ -381,6 +381,7 @@ async function renderSyncTool(header, toast, reload, sync) {
   const meta = await loadSyncMeta();
   const base = await getApiBase();
   const input = el("input", { class: "input", id: "api-base", value: base, placeholder: DEFAULT_API_BASE });
+  const tokenInput = el("input", { class: "input", id: "api-token", type: "password", autocomplete: "off", placeholder: "留空保持当前令牌" });
   const status = meta.connected
     ? `已连接${meta.lastSyncAt ? ` · 上次同步 ${formatDateTime(meta.lastSyncAt)}` : ""}`
     : meta.error || "未连接";
@@ -390,6 +391,8 @@ async function renderSyncTool(header, toast, reload, sync) {
     header("后端同步"),
     el("p", { class: "muted" }, "数据保存在 Leon Workflow 后端。请先启动后端（默认 8080）。"),
     el("div", { class: "field" }, el("label", {}, "后端地址"), input),
+    el("div", { class: "field" }, el("label", {}, "访问令牌"), tokenInput),
+    el("p", { class: "muted" }, "令牌只保存在本次浏览器会话，重启后需重新输入；更换地址时需重新输入。"),
     el("p", { class: "muted" }, status),
     el(
       "button",
@@ -398,6 +401,12 @@ async function renderSyncTool(header, toast, reload, sync) {
         type: "button",
         onClick: async () => {
           const next = input.value.trim().replace(/\/$/, "") || DEFAULT_API_BASE;
+          try {
+            if (tokenInput.value.trim()) await saveApiToken(next, tokenInput.value);
+          } catch (error) {
+            toast(error instanceof Error ? error.message : "访问令牌无法保存");
+            return;
+          }
           await saveUi({ apiBase: next });
           const result = await sync();
           toast(result.ok ? "已保存" : result.error || "保存失败");

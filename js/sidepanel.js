@@ -565,13 +565,13 @@ function collectionCard(collection) {
         },
         el("strong", {}, collection.name),
         el("p", {}, collection.description || "暂无描述")
+      ),
+      el(
+        "div",
+        { class: "card-actions" },
+        el("button", { class: "btn", type: "button", onClick: () => openCollectionSheet(collection) }, icon("pencil"), "编辑"),
+        el("button", { class: "btn danger", type: "button", onClick: () => confirmDeleteCollection(collection) }, icon("trash"), "删除")
       )
-    ),
-    el(
-      "div",
-      { class: "card-actions" },
-      el("button", { class: "btn", type: "button", onClick: () => openCollectionSheet(collection) }, icon("pencil"), "编辑"),
-      el("button", { class: "btn danger", type: "button", onClick: () => confirmDeleteCollection(collection) }, icon("trash"), "删除")
     )
   );
   if (canDrag) {
